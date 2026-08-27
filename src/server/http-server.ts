@@ -222,25 +222,22 @@ export function createLearningLoopServer(
       );
       learningLoop.completePhotoUpload(auth, credential.uploadToken);
 
-      if (recognitionClient) {
-        const recognition = await recognitionClient({
-          imageDataUrl: String(body?.imageDataUrl ?? ""),
-        });
-        return send(
-          response,
-          200,
-          learningLoop.recordQuestionRecognition(
-            auth,
-            draftPhotoMatch.id,
-            recognition,
-          ),
+      if (!recognitionClient) {
+        throw new Error(
+          "题目识别服务未配置。请在服务端设置 DEEPSEEK_API_KEY 后重启，或返回手动录入。",
         );
       }
 
       return send(
         response,
         200,
-        learningLoop.reselectDraftImage(auth, draftPhotoMatch.id),
+        learningLoop.recordQuestionRecognition(
+          auth,
+          draftPhotoMatch.id,
+          await recognitionClient({
+            imageDataUrl: String(body?.imageDataUrl ?? ""),
+          }),
+        ),
       );
     }
     const draftConfirmMatch = match(route, "/drafts/:id/confirm");
