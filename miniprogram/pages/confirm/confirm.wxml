@@ -12,6 +12,9 @@
 
   <view class="card">
     <view class="card-title">孩子的作答（选填）</view>
+    <view wx:if="{{lowStudentAnswerConfidence}}" class="warning">
+      手写作答识别可能不准确，请核对或修改；无法确认可跳过分析。
+    </view>
     <input class="input" value="{{studentAnswer}}" bindinput="onAnswerInput"
            placeholder="填写孩子的答案，用于分析错误步骤" disabled="{{skipAnalysis}}" />
     <checkbox-group bindchange="onSkipChange" style="margin-top: 12rpx">
@@ -20,6 +23,7 @@
         <text class="muted">作答无法识别，跳过作答分析</text>
       </label>
     </checkbox-group>
+    <view class="muted" wx:if="{{studentAnswerConfidence !== null}}">手写识别置信度：{{studentAnswerConfidence}}</view>
   </view>
 
   <button wx:if="{{!manual}}" class="btn btn-plain" bindtap="retake">重新拍摄</button>

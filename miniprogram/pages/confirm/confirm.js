@@ -7,6 +7,8 @@ Page({
     stem: "",
     confidence: 1,
     lowConfidence: false,
+    studentAnswerConfidence: null,
+    lowStudentAnswerConfidence: false,
     studentAnswer: "",
     skipAnalysis: false,
     confirming: false,
@@ -26,6 +28,12 @@ Page({
       stem: recognition ? recognition.stem : "",
       confidence,
       lowConfidence: confidence < 0.6,
+      studentAnswer: recognition?.studentAnswer || "",
+      studentAnswerConfidence: recognition?.studentAnswerConfidence ?? null,
+      lowStudentAnswerConfidence:
+        recognition?.studentAnswerConfidence !== undefined &&
+        recognition.studentAnswerConfidence !== null &&
+        recognition.studentAnswerConfidence < 0.6,
     });
   },
 

@@ -24,7 +24,15 @@ Page({
         "GET",
         `/questions/${this.data.questionId}/explanation`,
       );
-      this.setData({ explanation, loading: false });
+      this.setData({
+        explanation,
+        loading: false,
+        mistakeForm: {
+          primary: explanation.suggestedPrimaryKnowledgePoint || "",
+          secondary: (explanation.suggestedSecondaryKnowledgePoints || []).join(","),
+          cause: explanation.suggestedMistakeCause || "",
+        },
+      });
     } catch (error) {
       this.setData({ loading: false });
       wx.showModal({

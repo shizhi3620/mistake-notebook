@@ -40,6 +40,9 @@ const explanationJson = {
   steps: ["把 5 分成 2 和 3", "3 + 2 = 5", "5 + 3 = 8"],
   finalAnswer: "8",
   variantExercise: { stem: "4 + 5 = ?", answer: "9" },
+  suggestedPrimaryKnowledgePoint: "20以内进位加法",
+  suggestedSecondaryKnowledgePoints: ["凑十法"],
+  suggestedMistakeCause: "把进位漏掉了",
 };
 
 test("the explanation provider posts a grade-aware prompt and parses strict JSON", async () => {
@@ -161,6 +164,8 @@ test("the recognition client sends the image and validates the structured result
     formulas: ["3+5"],
     confidence: 0.92,
     region: { x: 0.1, y: 0.2, width: 0.5, height: 0.3 },
+    studentAnswer: "7",
+    studentAnswerConfidence: 0.74,
   };
   const { fetchImpl, calls } = fakeFetch(() => ({
     body: chatCompletion(recognitionJson),

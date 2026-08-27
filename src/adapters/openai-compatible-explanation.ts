@@ -30,7 +30,10 @@ const SYSTEM_PROMPT = `你是一位面向中国大陆一至九年级学生的数
 - "approach": 解题思路概述。
 - "steps": 字符串数组，按顺序给出分步解题过程。
 - "finalAnswer": 最终答案。
-- "variantExercise": 对象 { "stem", "answer" }，一道考查同一知识点、难度相近、学生可独立完成的变式题。`;
+- "variantExercise": 对象 { "stem", "answer" }，一道考查同一知识点、难度相近、学生可独立完成的变式题。
+- "suggestedPrimaryKnowledgePoint": 建议的一个主知识点；不确定时为 null。
+- "suggestedSecondaryKnowledgePoints": 建议的零到两个次知识点字符串数组。
+- "suggestedMistakeCause": 根据学生作答建议的错因；没有学生作答或无法可靠判断时为 null。`;
 
 export function createOpenAiCompatibleExplanationProvider(
   options: OpenAiCompatibleAdapterOptions,
@@ -116,6 +119,31 @@ function assertExplanationContent(value: unknown): ExplanationContent {
     throw new Error(
       "Explanation provider returned JSON with an invalid shape.",
     );
+  }
+
+  if (
+    content.suggestedPrimaryKnowledgePoint !== undefined &&
+    content.suggestedPrimaryKnowledgePoint !== null &&
+    typeof content.suggestedPrimaryKnowledgePoint !== "string"
+  ) {
+    throw new Error("Suggested primary knowledge point has an invalid shape.");
+  }
+  if (
+    content.suggestedSecondaryKnowledgePoints !== undefined &&
+    (!Array.isArray(content.suggestedSecondaryKnowledgePoints) ||
+      !content.suggestedSecondaryKnowledgePoints.every(
+        (point) => typeof point === "string",
+      ) ||
+      content.suggestedSecondaryKnowledgePoints.length > 2)
+  ) {
+    throw new Error("Suggested secondary knowledge points have an invalid shape.");
+  }
+  if (
+    content.suggestedMistakeCause !== undefined &&
+    content.suggestedMistakeCause !== null &&
+    typeof content.suggestedMistakeCause !== "string"
+  ) {
+    throw new Error("Suggested mistake cause has an invalid shape.");
   }
 
   return content as ExplanationContent;

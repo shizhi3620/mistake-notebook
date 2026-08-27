@@ -83,6 +83,8 @@ export type QuestionRecognition = {
   formulas: string[];
   region: CropRegion | null;
   confidence: number;
+  studentAnswer?: string | null;
+  studentAnswerConfidence?: number | null;
 };
 
 export type QuestionDraft = {
@@ -136,6 +138,9 @@ export type ExplanationContent = {
   steps: string[];
   finalAnswer: string;
   variantExercise: { stem: string; answer: string };
+  suggestedPrimaryKnowledgePoint?: string | null;
+  suggestedSecondaryKnowledgePoints?: string[];
+  suggestedMistakeCause?: string | null;
 };
 
 export type Explanation = {
@@ -147,6 +152,9 @@ export type Explanation = {
   answerAvailable: boolean;
   finalAnswer: string | null;
   variantExercise: { stem: string; answer: string | null };
+  suggestedPrimaryKnowledgePoint: string | null;
+  suggestedSecondaryKnowledgePoints: string[];
+  suggestedMistakeCause: string | null;
 };
 
 export type MistakeRecord = {
@@ -1148,7 +1156,8 @@ export class LearningLoop {
       crop: draft.crop,
       rotationDegrees: draft.rotationDegrees,
       region: recognition?.region ?? null,
-      studentAnswer: confirmation.studentAnswer?.trim() || null,
+      studentAnswer:
+        (confirmation.studentAnswer ?? recognition?.studentAnswer)?.trim() || null,
       answerAnalysisSkipped: false,
       status: reliable ? "confirmed" : "pending-confirmation",
       createdAt: this.now(),
@@ -2080,6 +2089,14 @@ export class LearningLoop {
         stem: content.variantExercise.stem,
         answer: revealAnswer ? content.variantExercise.answer : null,
       },
+      suggestedPrimaryKnowledgePoint:
+        content.suggestedPrimaryKnowledgePoint?.trim() || null,
+      suggestedSecondaryKnowledgePoints:
+        content.suggestedSecondaryKnowledgePoints
+          ?.map((point) => point.trim())
+          .filter(Boolean)
+          .slice(0, 2) ?? [],
+      suggestedMistakeCause: content.suggestedMistakeCause?.trim() || null,
     };
   }
 

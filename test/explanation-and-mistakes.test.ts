@@ -39,6 +39,9 @@ const explanationContent = {
   steps: ["把 5 分成 2 和 3", "3 + 2 = 5", "5 + 3 = 8"],
   finalAnswer: "8",
   variantExercise: { stem: "4 + 5 = ?", answer: "9" },
+  suggestedPrimaryKnowledgePoint: "20以内进位加法",
+  suggestedSecondaryKnowledgePoints: ["凑十法"],
+  suggestedMistakeCause: "把加法看成减法",
 };
 
 test("the explanation unfolds hint-first and hides the final answer unless the guardian allows it", async () => {
@@ -59,6 +62,9 @@ test("the explanation unfolds hint-first and hides the final answer unless the g
   assert.equal(folded.finalAnswer, null);
   assert.equal(folded.answerAvailable, true);
   assert.equal(folded.variantExercise.answer, null);
+  assert.equal(folded.suggestedPrimaryKnowledgePoint, "20以内进位加法");
+  assert.deepEqual(folded.suggestedSecondaryKnowledgePoints, ["凑十法"]);
+  assert.equal(folded.suggestedMistakeCause, "把加法看成减法");
   assert.equal(requests[0]?.grade, 3);
 
   const stillFolded = await learningLoop.getExplanation(guardian.id, question.id, {
@@ -115,6 +121,25 @@ test("a student answer can be attached later and unclear handwriting skips answe
       }),
     /not available to this guardian/i,
   );
+});
+
+test("a confirmed question uses recognized handwriting until a guardian edits it", () => {
+  const learningLoop = new LearningLoop();
+  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
+  const draft = learningLoop.startQuestionDraft(guardian.id, child.id, "camera");
+  learningLoop.recordQuestionRecognition(guardian.id, draft.id, {
+    stem: "3 + 5 = ?",
+    formulas: ["3 + 5"],
+    region: null,
+    confidence: 0.95,
+    studentAnswer: "7",
+    studentAnswerConfidence: 0.42,
+  });
+
+  const question = learningLoop.confirmQuestion(guardian.id, draft.id, {
+    stem: "3 + 5 = ?",
+  });
+  assert.equal(question.studentAnswer, "7");
 });
 
 test("a saved mistake carries one primary knowledge point, up to two secondary, and an editable cause", () => {

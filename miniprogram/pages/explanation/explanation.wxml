@@ -35,17 +35,18 @@
 
     <view class="card" wx:if="{{!saved}}">
       <view class="card-title">保存到错题本</view>
+      <view class="muted">以下为 AI 建议，请确认或修改后保存。</view>
       <view class="field">
         <view class="label">主知识点（必填）</view>
-        <input class="input" data-field="primary" placeholder="如：20以内进位加法" bindinput="onMistakeInput" />
+        <input class="input" data-field="primary" value="{{mistakeForm.primary}}" placeholder="如：20以内进位加法" bindinput="onMistakeInput" />
       </view>
       <view class="field">
         <view class="label">次知识点（选填，逗号分隔，至多两个）</view>
-        <input class="input" data-field="secondary" placeholder="如：凑十法,数的组成" bindinput="onMistakeInput" />
+        <input class="input" data-field="secondary" value="{{mistakeForm.secondary}}" placeholder="如：凑十法,数的组成" bindinput="onMistakeInput" />
       </view>
       <view class="field">
         <view class="label">错因（选填）</view>
-        <input class="input" data-field="cause" placeholder="如：粗心抄错数字" bindinput="onMistakeInput" />
+        <input class="input" data-field="cause" value="{{mistakeForm.cause}}" placeholder="如：粗心抄错数字" bindinput="onMistakeInput" />
       </view>
       <button class="btn btn-primary" disabled="{{saving}}" bindtap="saveMistake">保存错题</button>
     </view>
