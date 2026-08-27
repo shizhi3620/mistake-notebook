@@ -1,0 +1,51 @@
+<view class="page">
+  <view wx:if="{{loading}}" class="muted">加载中…</view>
+
+  <block wx:elif="{{report}}">
+    <view wx:if="{{report.empty}}" class="card">
+      <view class="card-title">本周报告</view>
+      <view class="muted">{{report.suggestion}}</view>
+    </view>
+
+    <block wx:else>
+      <view class="card">
+        <view class="card-title">本周学习量</view>
+        <view class="muted">新增错题 {{report.newMistakes}} 道 · 完成复习 {{report.completedReviews}} 次</view>
+        <view class="muted">
+          掌握度变化 {{report.masteryChange.netChange}}（进步 {{report.masteryChange.improvedReviews}} 次 · 退步 {{report.masteryChange.declinedReviews}} 次）
+        </view>
+      </view>
+
+      <view class="card" wx:if="{{report.weaknesses.length > 0}}">
+        <view class="card-title">需要关注的知识点</view>
+        <view wx:for="{{report.weaknesses}}" wx:key="knowledgePoint"
+              style="padding: 12rpx 0; border-top: 1rpx solid #f0f1f3">
+          <view class="row">
+            <view>{{item.knowledgePoint}}</view>
+            <view class="tag tag-orange">{{item.mistakeCount}} 道错题</view>
+          </view>
+          <view class="muted">{{item.suggestion}}</view>
+        </view>
+      </view>
+
+      <view class="card">
+        <view class="card-title">下周计划</view>
+        <view class="muted">待复习 {{report.nextWeekPlan.scheduledReviews}} 道</view>
+        <view wx:if="{{report.nextWeekPlan.focusKnowledgePoints.length > 0}}" style="margin-top: 8rpx">
+          <text wx:for="{{report.nextWeekPlan.focusKnowledgePoints}}" wx:key="*this" class="tag">{{item}}</text>
+        </view>
+      </view>
+
+      <view class="card">
+        <view class="card-title">建议</view>
+        <view>{{report.suggestion}}</view>
+      </view>
+
+      <view wx:if="{{report.upgradeNote}}" class="warning">{{report.upgradeNote}}</view>
+
+      <button class="btn btn-plain" bindtap="goMistakes">查看相关错题</button>
+    </block>
+
+    <view class="muted" style="text-align: center; margin-top: 24rpx">{{report.comparisonNote}}</view>
+  </block>
+</view>

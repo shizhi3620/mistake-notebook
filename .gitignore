@@ -1,0 +1,22 @@
+# Dependencies and build output
+node_modules/
+dist/
+build/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+
+# Local runtime data and logs
+data/*.db
+data/*.db-*
+*.log
+
+# WeChat Developer Tools local/private settings
+miniprogram/project.private.config.json
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/

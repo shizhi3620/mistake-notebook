@@ -1,0 +1,29 @@
+<view class="page">
+  <view wx:if="{{lowConfidence}}" class="warning">
+    识别结果可能不准确，请仔细核对题干；也可以返回重拍。
+  </view>
+
+  <view class="card">
+    <view class="card-title">题干</view>
+    <textarea class="input" auto-height value="{{stem}}" bindinput="onStemInput"
+              placeholder="识别出的题干，可直接修改" />
+    <view class="muted" wx:if="{{!manual && confidence < 1}}">识别置信度：{{confidence}}</view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">孩子的作答（选填）</view>
+    <input class="input" value="{{studentAnswer}}" bindinput="onAnswerInput"
+           placeholder="填写孩子的答案，用于分析错误步骤" disabled="{{skipAnalysis}}" />
+    <checkbox-group bindchange="onSkipChange" style="margin-top: 12rpx">
+      <label>
+        <checkbox value="1" checked="{{skipAnalysis}}" />
+        <text class="muted">作答无法识别，跳过作答分析</text>
+      </label>
+    </checkbox-group>
+  </view>
+
+  <button wx:if="{{!manual}}" class="btn btn-plain" bindtap="retake">重新拍摄</button>
+  <button class="btn btn-primary" disabled="{{confirming}}" bindtap="confirm">
+    {{confirming ? "确认中…" : "确认题目，查看讲解"}}
+  </button>
+</view>

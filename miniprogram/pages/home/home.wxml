@@ -1,0 +1,78 @@
+<view class="page">
+  <view wx:if="{{loading}}" class="muted">加载中…</view>
+
+  <block wx:elif="{{needsGuardianship}}">
+    <view class="card">
+      <view class="card-title">监护人确认</view>
+      <view class="muted" style="margin-bottom: 16rpx">
+        本产品帮助家长整理孩子的数学错题并安排复习。使用前请确认：
+      </view>
+      <view style="margin-bottom: 8rpx">· 你是孩子的家长或法定监护人</view>
+      <view style="margin-bottom: 8rpx">· 题目照片仅用于识别与讲解，不会公开展示或用于训练</view>
+      <view style="margin-bottom: 8rpx">· 你可以随时删除孩子的全部学习数据</view>
+      <button class="btn btn-primary" bindtap="confirmGuardianship">同意并继续</button>
+    </view>
+  </block>
+
+  <block wx:elif="{{stage === 'no-child-profile'}}">
+    <view class="card">
+      <view class="card-title">创建孩子档案</view>
+      <view class="field">
+        <view class="label">昵称</view>
+        <input class="input" data-field="nickname" placeholder="孩子的小名" bindinput="onInput" />
+      </view>
+      <view class="field">
+        <view class="label">年级</view>
+        <picker range="{{grades}}" value="{{gradeIndex}}" bindchange="onGradeChange">
+          <view class="input">{{grades[gradeIndex]}} 年级</view>
+        </picker>
+      </view>
+      <view class="field">
+        <view class="label">地区</view>
+        <input class="input" data-field="region" placeholder="如：浙江" bindinput="onInput" />
+      </view>
+      <view class="field">
+        <view class="label">教材版本（选填）</view>
+        <input class="input" data-field="textbookVersion" placeholder="如：人教版" bindinput="onInput" />
+      </view>
+      <button class="btn btn-primary" disabled="{{saving}}" bindtap="createChild">创建档案</button>
+    </view>
+  </block>
+
+  <block wx:elif="{{stage === 'ready'}}">
+    <view class="card">
+      <view class="row">
+        <view class="card-title" style="margin-bottom: 0">{{child.nickname}} · {{child.grade}} 年级</view>
+        <view class="tag tag-green" wx:if="{{streakDays > 0}}">连续复习 {{streakDays}} 天</view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="row">
+        <view>
+          <view class="card-title" style="margin-bottom: 4rpx">今日待复习</view>
+          <view class="muted">{{dueReviewCount}} 道题</view>
+        </view>
+        <button class="btn btn-primary" style="margin-top: 0; min-width: 180rpx"
+                disabled="{{dueReviewCount === 0}}" bindtap="goReview">开始复习</button>
+      </view>
+    </view>
+
+    <button class="btn btn-primary" bindtap="goCapture">拍一道题</button>
+    <button class="btn btn-plain" bindtap="goReport">查看周报</button>
+    <button class="btn btn-plain" bindtap="goMistakes">打开错题本</button>
+
+    <view class="card" wx:if="{{recentMistakes.length > 0}}" style="margin-top: 24rpx">
+      <view class="card-title">最近错题</view>
+      <view wx:for="{{recentMistakes}}" wx:key="id" style="padding: 12rpx 0; border-top: 1rpx solid #f0f1f3">
+        <view>{{item.stem}}</view>
+        <view class="muted">{{item.primaryKnowledgePoint}}</view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">七日摘要</view>
+      <view class="muted">新增错题 {{sevenDaySummary.newMistakes}} 道 · 完成复习 {{sevenDaySummary.completedReviews}} 次</view>
+    </view>
+  </block>
+</view>

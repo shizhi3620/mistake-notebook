@@ -1,0 +1,23 @@
+<view class="page">
+  <block wx:if="{{!imagePath}}">
+    <view class="card">
+      <view class="card-title">拍摄或选择一道数学题</view>
+      <view class="muted" style="margin-bottom: 16rpx">每张照片只保留一道题，注意遮挡姓名等无关信息。</view>
+      <button class="btn btn-primary" data-source="camera" bindtap="chooseImage">拍照</button>
+      <button class="btn btn-plain" data-source="album" bindtap="chooseImage">从相册选择</button>
+      <button class="btn btn-plain" bindtap="manualEntry">手动录入题目</button>
+    </view>
+  </block>
+
+  <block wx:else>
+    <view class="card">
+      <image src="{{imagePath}}" mode="widthFix"
+             style="width: 100%; transform: rotate({{rotationDegrees}}deg)" />
+    </view>
+    <button class="btn btn-plain" bindtap="rotate">旋转 90°</button>
+    <button class="btn btn-plain" bindtap="reselect">重新选择</button>
+    <button class="btn btn-primary" disabled="{{uploading}}" bindtap="upload">
+      {{uploading ? "上传识别中…" : "上传并识别"}}
+    </button>
+  </block>
+</view>

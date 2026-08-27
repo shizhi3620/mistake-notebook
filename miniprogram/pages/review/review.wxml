@@ -1,0 +1,58 @@
+<view class="page">
+  <view wx:if="{{loading}}" class="muted">加载中…</view>
+
+  <block wx:elif="{{phase === 'list'}}">
+    <view wx:if="{{due.length === 0}}" class="card">
+      <view class="card-title">今天没有待复习的题</view>
+      <view class="muted">保持节奏，明天再来看看。</view>
+    </view>
+    <view wx:for="{{due}}" wx:key="id" class="card">
+      <view style="margin-bottom: 8rpx">{{item.stem}}</view>
+      <view style="margin-bottom: 12rpx">
+        <text class="tag">{{item.primaryKnowledgePoint}}</text>
+        <text class="tag tag-orange">掌握度 {{item.masteryScore}}</text>
+      </view>
+      <button class="btn btn-primary" data-id="{{item.id}}" data-exercise="original" bindtap="startReview">复习原题</button>
+      <button class="btn btn-plain" data-id="{{item.id}}" data-exercise="variant" bindtap="startReview">练变式题</button>
+    </view>
+  </block>
+
+  <block wx:elif="{{phase === 'recall'}}">
+    <view class="card">
+      <view class="card-title">先回忆</view>
+      <view>{{session.recallPrompt}}</view>
+    </view>
+    <button class="btn btn-primary" bindtap="recalled">我已回忆，开始作答</button>
+  </block>
+
+  <block wx:elif="{{phase === 'exercise'}}">
+    <view class="card">
+      <view class="card-title">{{session.exercise.kind === 'variant' ? '变式练习' : '原题复习'}}</view>
+      <view>{{session.exercise.stem}}</view>
+    </view>
+    <view class="card" wx:if="{{session.exercise.kind === 'variant'}}">
+      <view class="card-title">变式题答对了吗？</view>
+      <view class="row">
+        <button class="btn {{variantCorrect === true ? 'btn-primary' : 'btn-plain'}}"
+                data-value="1" bindtap="markVariant" style="flex: 1; margin-right: 12rpx">答对了</button>
+        <button class="btn {{variantCorrect === false ? 'btn-primary' : 'btn-plain'}}"
+                data-value="0" bindtap="markVariant" style="flex: 1">答错了</button>
+      </view>
+    </view>
+    <view class="card">
+      <view class="card-title">这次掌握得怎么样？</view>
+      <button class="btn btn-plain" data-value="not-yet" bindtap="assess">还没掌握</button>
+      <button class="btn btn-plain" data-value="partially" bindtap="assess">部分掌握</button>
+      <button class="btn btn-primary" data-value="mastered" bindtap="assess">已经掌握</button>
+    </view>
+  </block>
+
+  <block wx:elif="{{phase === 'done'}}">
+    <view class="card">
+      <view class="card-title">本次复习已记录</view>
+      <view class="muted" style="margin-bottom: 8rpx">掌握度：{{result.masteryScore}}（{{result.masteryNote}}）</view>
+      <view class="muted">下次复习间隔：{{result.intervalDays}} 天</view>
+    </view>
+    <button class="btn btn-primary" bindtap="backToList">返回复习列表</button>
+  </block>
+</view>

@@ -1,0 +1,56 @@
+<view class="page">
+  <view wx:if="{{loading}}" class="muted">正在生成讲解…</view>
+
+  <block wx:elif="{{explanation}}">
+    <view class="card">
+      <view class="card-title">先想一想</view>
+      <view>{{explanation.hint}}</view>
+    </view>
+
+    <button wx:if="{{!showApproach}}" class="btn btn-plain" bindtap="revealApproach">看解题思路</button>
+    <view wx:if="{{showApproach}}" class="card">
+      <view class="card-title">解题思路</view>
+      <view>{{explanation.approach}}</view>
+    </view>
+
+    <button wx:if="{{showApproach && !showSteps}}" class="btn btn-plain" bindtap="revealSteps">看分步过程</button>
+    <view wx:if="{{showSteps}}" class="card">
+      <view class="card-title">分步过程</view>
+      <view wx:for="{{explanation.steps}}" wx:key="index" style="padding: 8rpx 0">
+        {{index + 1}}. {{item}}
+      </view>
+    </view>
+
+    <button wx:if="{{showSteps && !showAnswer}}" class="btn btn-plain" bindtap="revealAnswer">看最终答案</button>
+    <view wx:if="{{showAnswer}}" class="card">
+      <view class="card-title">最终答案</view>
+      <view>{{explanation.finalAnswer}}</view>
+    </view>
+
+    <view class="card" wx:if="{{showSteps}}">
+      <view class="card-title">变式练习</view>
+      <view>{{explanation.variantExercise.stem}}</view>
+      <view class="muted" wx:if="{{showAnswer}}">答案：{{explanation.variantExercise.answer}}</view>
+    </view>
+
+    <view class="card" wx:if="{{!saved}}">
+      <view class="card-title">保存到错题本</view>
+      <view class="field">
+        <view class="label">主知识点（必填）</view>
+        <input class="input" data-field="primary" placeholder="如：20以内进位加法" bindinput="onMistakeInput" />
+      </view>
+      <view class="field">
+        <view class="label">次知识点（选填，逗号分隔，至多两个）</view>
+        <input class="input" data-field="secondary" placeholder="如：凑十法,数的组成" bindinput="onMistakeInput" />
+      </view>
+      <view class="field">
+        <view class="label">错因（选填）</view>
+        <input class="input" data-field="cause" placeholder="如：粗心抄错数字" bindinput="onMistakeInput" />
+      </view>
+      <button class="btn btn-primary" disabled="{{saving}}" bindtap="saveMistake">保存错题</button>
+    </view>
+
+    <button wx:if="{{saved}}" class="btn btn-primary" bindtap="finish">完成，返回首页</button>
+    <button wx:else class="btn btn-plain" bindtap="finish">暂不保存，返回首页</button>
+  </block>
+</view>

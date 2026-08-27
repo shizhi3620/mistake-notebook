@@ -1,0 +1,43 @@
+<view class="page">
+  <view class="card">
+    <view class="field">
+      <input class="input" data-field="keyword" placeholder="搜索题干关键词"
+             value="{{keyword}}" bindinput="onFilterInput" confirm-type="search" bindconfirm="search" />
+    </view>
+    <view class="row">
+      <input class="input" style="flex: 1; margin-right: 12rpx" data-field="knowledgePoint"
+             placeholder="知识点" value="{{knowledgePoint}}" bindinput="onFilterInput" bindconfirm="search" />
+      <input class="input" style="flex: 1" data-field="mistakeCause"
+             placeholder="错因" value="{{mistakeCause}}" bindinput="onFilterInput" bindconfirm="search" />
+    </view>
+    <view class="row" style="margin-top: 12rpx">
+      <picker range="{{masteryOptions}}" value="{{masteryIndex}}" bindchange="onMasteryChange">
+        <view class="input" style="min-width: 200rpx">{{masteryOptions[masteryIndex]}}</view>
+      </picker>
+      <button class="btn btn-primary" style="margin-top: 0; min-width: 160rpx" bindtap="search">筛选</button>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="muted">加载中…</view>
+  <view wx:elif="{{mistakes.length === 0}}" class="card">
+    <view class="muted">没有符合条件的错题。</view>
+  </view>
+
+  <view wx:for="{{mistakes}}" wx:key="id" class="card">
+    <view style="margin-bottom: 8rpx">{{item.stem}}</view>
+    <view style="margin-bottom: 8rpx">
+      <text class="tag">{{item.primaryKnowledgePoint}}</text>
+      <text wx:for="{{item.secondaryKnowledgePoints}}" wx:for-item="point" wx:key="*this" class="tag">{{point}}</text>
+      <text class="tag {{item.masteryStatus === 'mastered' ? 'tag-green' : 'tag-orange'}}">
+        {{item.masteryStatus === 'mastered' ? '已掌握' : item.masteryStatus === 'learning' ? '学习中' : '未开始'}}
+      </text>
+    </view>
+    <view class="muted" style="margin-bottom: 12rpx">错因：{{item.mistakeCause || '未填写'}}</view>
+    <view class="row">
+      <button class="btn btn-plain" style="margin-top: 0; flex: 1; margin-right: 12rpx"
+              data-id="{{item.id}}" data-cause="{{item.mistakeCause}}" bindtap="editCause">修改错因</button>
+      <button class="btn btn-danger" style="margin-top: 0; flex: 1"
+              data-id="{{item.id}}" bindtap="remove">删除</button>
+    </view>
+  </view>
+</view>

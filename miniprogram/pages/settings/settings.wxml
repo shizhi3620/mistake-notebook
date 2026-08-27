@@ -1,0 +1,83 @@
+<view class="page">
+  <view wx:if="{{loading}}" class="muted">加载中…</view>
+
+  <block wx:else>
+    <view class="card">
+      <view class="row" style="margin-bottom: 12rpx">
+        <view class="card-title" style="margin-bottom: 0">孩子档案</view>
+        <button class="btn btn-plain" style="margin-top: 0" bindtap="toggleChildForm">
+          {{showChildForm ? "取消" : "添加"}}
+        </button>
+      </view>
+      <view wx:for="{{children}}" wx:key="id" class="row" style="padding: 12rpx 0; border-top: 1rpx solid #f0f1f3">
+        <view>
+          <view>{{item.nickname}} · {{item.grade}} 年级</view>
+          <view class="muted">{{item.region}}{{item.textbookVersion ? ' · ' + item.textbookVersion : ''}}</view>
+        </view>
+        <view class="row">
+          <button wx:if="{{item.id !== selectedChildId}}" class="btn btn-plain"
+                  style="margin-top: 0; margin-right: 12rpx" data-id="{{item.id}}" bindtap="selectChild">切换</button>
+          <text wx:else class="tag tag-green">当前</text>
+          <button class="btn btn-danger" style="margin-top: 0" data-id="{{item.id}}" bindtap="removeChild">删除</button>
+        </view>
+      </view>
+
+      <block wx:if="{{showChildForm}}">
+        <view class="field" style="margin-top: 16rpx">
+          <input class="input" data-field="nickname" placeholder="昵称" bindinput="onInput" />
+        </view>
+        <view class="field">
+          <picker range="{{grades}}" value="{{gradeIndex}}" bindchange="onGradeChange">
+            <view class="input">{{grades[gradeIndex]}} 年级</view>
+          </picker>
+        </view>
+        <view class="field">
+          <input class="input" data-field="region" placeholder="地区" bindinput="onInput" />
+        </view>
+        <view class="field">
+          <input class="input" data-field="textbookVersion" placeholder="教材版本（选填）" bindinput="onInput" />
+        </view>
+        <button class="btn btn-primary" bindtap="createChild">保存档案</button>
+      </block>
+    </view>
+
+    <view class="card">
+      <view class="row">
+        <view>
+          <view class="card-title" style="margin-bottom: 4rpx">允许直接查看答案</view>
+          <view class="muted">开启后孩子可展开完整答案</view>
+        </view>
+        <switch checked="{{account.allowDirectAnswerReveal}}" bindchange="toggleAnswerReveal" />
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="row">
+        <view>
+          <view class="card-title" style="margin-bottom: 4rpx">复习提醒</view>
+          <view class="muted">每天至多一条，可在系统设置中随时撤回授权</view>
+        </view>
+        <switch checked="{{reminderEnabled}}" bindchange="toggleReminder" />
+      </view>
+      <view class="row" wx:if="{{reminderEnabled}}" style="margin-top: 16rpx">
+        <view class="label" style="margin-bottom: 0">提醒时间</view>
+        <picker range="{{hours}}" value="{{hourIndex}}" bindchange="onHourChange">
+          <view class="input" style="min-width: 200rpx">{{hours[hourIndex]}}</view>
+        </picker>
+      </view>
+    </view>
+
+    <view class="card" wx:if="{{entitlements}}">
+      <view class="card-title">套餐</view>
+      <view class="muted">{{entitlements.plan === 'subscriber' ? '订阅版' : '免费版'}}</view>
+      <view class="muted">本月拍题 {{entitlements.photosUsedThisMonth}} / {{entitlements.monthlyPhotoQuota}}</view>
+      <view class="muted" wx:if="{{entitlements.monthlyVariantExerciseQuota !== null}}">
+        本月变式练习 {{entitlements.variantExercisesUsedThisMonth}} / {{entitlements.monthlyVariantExerciseQuota}}
+      </view>
+      <view class="muted" wx:else>变式练习不限量</view>
+      <button wx:if="{{entitlements.plan === 'free'}}" class="btn btn-plain" bindtap="subscribe">
+        升级订阅（调试入口）
+      </button>
+    </view>
+  </block>
+</view>

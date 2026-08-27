@@ -1,0 +1,34 @@
+{
+  "pages": [
+    "pages/home/home",
+    "pages/mistakes/mistakes",
+    "pages/settings/settings",
+    "pages/capture/capture",
+    "pages/confirm/confirm",
+    "pages/explanation/explanation",
+    "pages/review/review",
+    "pages/report/report"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTitleText": "数学错题本",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f5f6f8"
+  },
+  "tabBar": {
+    "color": "#8a8f99",
+    "selectedColor": "#07c160",
+    "backgroundColor": "#ffffff",
+    "list": [
+      { "pagePath": "pages/home/home", "text": "首页" },
+      { "pagePath": "pages/mistakes/mistakes", "text": "错题本" },
+      { "pagePath": "pages/settings/settings", "text": "我的" }
+    ]
+  },
+  "permission": {
+    "scope.camera": {
+      "desc": "用于拍摄数学错题照片"
+    }
+  },
+  "sitemapLocation": "sitemap.json"
+}
