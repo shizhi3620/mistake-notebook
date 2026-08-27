@@ -42,22 +42,19 @@ Page({
     if (!this.data.childId) {
       return;
     }
-    const params = new URLSearchParams({ childProfileId: this.data.childId });
-    if (this.data.keyword.trim()) {
-      params.set("keyword", this.data.keyword.trim());
-    }
-    if (this.data.knowledgePoint.trim()) {
-      params.set("knowledgePoint", this.data.knowledgePoint.trim());
-    }
-    if (this.data.mistakeCause.trim()) {
-      params.set("mistakeCause", this.data.mistakeCause.trim());
-    }
+    const params = [`childProfileId=${encodeURIComponent(this.data.childId)}`];
+    const keyword = String(this.data.keyword || "").trim();
+    const knowledgePoint = String(this.data.knowledgePoint || "").trim();
+    const mistakeCause = String(this.data.mistakeCause || "").trim();
+    if (keyword) params.push(`keyword=${encodeURIComponent(keyword)}`);
+    if (knowledgePoint) params.push(`knowledgePoint=${encodeURIComponent(knowledgePoint)}`);
+    if (mistakeCause) params.push(`mistakeCause=${encodeURIComponent(mistakeCause)}`);
     const mastery = MASTERY_OPTIONS[this.data.masteryIndex].value;
     if (mastery) {
-      params.set("masteryStatus", mastery);
+      params.push(`masteryStatus=${encodeURIComponent(mastery)}`);
     }
     try {
-      const mistakes = await api.request("GET", `/mistakes?${params}`);
+      const mistakes = await api.request("GET", `/mistakes?${params.join("&")}`);
       this.setData({ mistakes, loading: false });
     } catch (error) {
       this.setData({ loading: false });
