@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import Database from "better-sqlite3";
 
 import { LearningLoop } from "../src/learning-loop.ts";
 import { SqliteLearningLoopStore } from "../src/sqlite-learning-loop-store.ts";
@@ -31,7 +32,12 @@ test("a confirmed guardian can create a minimal child profile", () => {
   const child = learningLoop.createChildProfile(account.id, {
     nickname: "小明",
     grade: 3,
-    region: "浙江",
+    location: {
+      provinceCode: "330000",
+      provinceName: "浙江省",
+      cityCode: "330100",
+      cityName: "杭州市",
+    },
     textbookVersion: "人教版",
   });
 
@@ -43,7 +49,13 @@ test("a confirmed guardian can create a minimal child profile", () => {
       parentAccountId: account.id,
       nickname: "小明",
       grade: 3,
-      region: "浙江",
+      region: "浙江省 杭州市",
+      location: {
+        provinceCode: "330000",
+        provinceName: "浙江省",
+        cityCode: "330100",
+        cityName: "杭州市",
+      },
       textbookVersion: "人教版",
     },
   );
@@ -72,6 +84,55 @@ test("a selected child profile is restored only for its guardian", () => {
     /parent account was not found/i,
   );
   restoredStore.close();
+});
+
+test("SQLite keeps legacy regions pending and persists selected province/city", () => {
+  const databasePath = join(mkdtempSync(join(tmpdir(), "mistake-notebook-")), "learning.db");
+  const legacyDatabase = new Database(databasePath);
+  legacyDatabase.exec(`
+    CREATE TABLE child_profiles (
+      id TEXT PRIMARY KEY,
+      parent_account_id TEXT NOT NULL,
+      nickname TEXT NOT NULL,
+      grade INTEGER NOT NULL,
+      region TEXT NOT NULL,
+      textbook_version TEXT
+    );
+    INSERT INTO child_profiles
+      (id, parent_account_id, nickname, grade, region)
+      VALUES ('legacy-child', 'parent-1', '小明', 3, '浙江');
+  `);
+  legacyDatabase.close();
+
+  const store = new SqliteLearningLoopStore(databasePath);
+  assert.deepEqual(store.listChildProfiles("parent-1")[0], {
+    id: "legacy-child",
+    parentAccountId: "parent-1",
+    nickname: "小明",
+    grade: 3,
+    region: "浙江",
+  });
+
+  store.createChildProfile({
+    id: "new-child",
+    parentAccountId: "parent-1",
+    nickname: "小红",
+    grade: 4,
+    region: "上海市 上海市",
+    location: {
+      provinceCode: "310000",
+      provinceName: "上海市",
+      cityCode: "310100",
+      cityName: "上海市",
+    },
+  });
+  assert.deepEqual(store.findChildProfile("parent-1", "new-child")?.location, {
+    provinceCode: "310000",
+    provinceName: "上海市",
+    cityCode: "310100",
+    cityName: "上海市",
+  });
+  store.close();
 });
 
 test("a guardian can edit and switch only their own child profiles", () => {
@@ -113,7 +174,7 @@ test("a guardian can edit and switch only their own child profiles", () => {
   );
 });
 
-test("child profiles require a nickname, a grade from one to nine, and a region", () => {
+test("child profiles require a nickname, a grade from one to nine, and a province/city", () => {
   const learningLoop = new LearningLoop();
   const guardian = learningLoop.startWeChatLogin("guardian-code").account;
 
@@ -142,9 +203,14 @@ test("child profiles require a nickname, a grade from one to nine, and a region"
       learningLoop.createChildProfile(guardian.id, {
         nickname: "小明",
         grade: 3,
-        region: "",
+        location: {
+          provinceCode: "330000",
+          provinceName: "浙江省",
+          cityCode: "",
+          cityName: "",
+        },
       }),
-    /region/i,
+    /province and city/i,
   );
 });
 

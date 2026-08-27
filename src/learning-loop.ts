@@ -1,9 +1,18 @@
 import { randomUUID } from "node:crypto";
 
+export type ProvinceCity = {
+  provinceCode: string;
+  provinceName: string;
+  cityCode: string;
+  cityName: string;
+};
+
 export type ChildProfileInput = {
   nickname: string;
   grade: number;
-  region: string;
+  location?: ProvinceCity;
+  // Kept during the region migration for clients and profiles created before it.
+  region?: string;
   textbookVersion?: string;
 };
 
@@ -2098,6 +2107,7 @@ export class LearningLoop {
 
     const childProfile = {
       ...profile,
+      region: profile.region ?? this.displayRegion(profile.location!),
       id: randomUUID(),
       parentAccountId,
     };
@@ -2129,6 +2139,7 @@ export class LearningLoop {
     this.validateChildProfile(profile);
     const updatedChildProfile = {
       ...profile,
+      region: profile.region ?? this.displayRegion(profile.location!),
       id: childProfile.id,
       parentAccountId: childProfile.parentAccountId,
     };
@@ -2225,8 +2236,25 @@ export class LearningLoop {
       throw new Error("A child profile grade must be from one to nine.");
     }
 
-    if (!profile.region.trim()) {
-      throw new Error("A child profile region is required.");
+    if (profile.location) {
+      const { provinceCode, provinceName, cityCode, cityName } = profile.location;
+      if (
+        !/^\d{6}$/.test(provinceCode) ||
+        !provinceName.trim() ||
+        !/^\d{6}$/.test(cityCode) ||
+        !cityName.trim()
+      ) {
+        throw new Error("A child profile province and city are required.");
+      }
+      return;
     }
+
+    if (!profile.region?.trim()) {
+      throw new Error("A child profile province and city are required.");
+    }
+  }
+
+  private displayRegion(location: ProvinceCity): string {
+    return `${location.provinceName} ${location.cityName}`;
   }
 }

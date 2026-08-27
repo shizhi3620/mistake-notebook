@@ -34,6 +34,10 @@ type ChildProfileRow = {
   nickname: string;
   grade: number;
   region: string;
+  province_code: string | null;
+  province_name: string | null;
+  city_code: string | null;
+  city_name: string | null;
   textbook_version: string | null;
 };
 
@@ -145,6 +149,10 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
         nickname TEXT NOT NULL,
         grade INTEGER NOT NULL,
         region TEXT NOT NULL,
+        province_code TEXT,
+        province_name TEXT,
+        city_code TEXT,
+        city_name TEXT,
         textbook_version TEXT
       );
       CREATE TABLE IF NOT EXISTS sessions (
@@ -235,6 +243,7 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
         status TEXT NOT NULL
       );
     `);
+    this.migrateChildProfileLocations();
   }
 
   saveReminderSettings(settings: ReminderSettings): void {
@@ -1077,15 +1086,20 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
     this.database
       .prepare(
         `INSERT INTO child_profiles
-          (id, parent_account_id, nickname, grade, region, textbook_version)
-          VALUES (?, ?, ?, ?, ?, ?)`,
+          (id, parent_account_id, nickname, grade, region,
+           province_code, province_name, city_code, city_name, textbook_version)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         profile.id,
         profile.parentAccountId,
         profile.nickname,
         profile.grade,
-        profile.region,
+        profile.region ?? `${profile.location!.provinceName} ${profile.location!.cityName}`,
+        profile.location?.provinceCode ?? null,
+        profile.location?.provinceName ?? null,
+        profile.location?.cityCode ?? null,
+        profile.location?.cityName ?? null,
         profile.textbookVersion ?? null,
       );
   }
@@ -1094,7 +1108,7 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
     const rows = this.database
       .prepare(
         `SELECT id, parent_account_id, nickname, grade, region,
-                textbook_version
+                province_code, province_name, city_code, city_name, textbook_version
            FROM child_profiles
           WHERE parent_account_id = ?`,
       )
@@ -1109,7 +1123,8 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
   ): ChildProfile | undefined {
     const row = this.database
       .prepare(
-        `SELECT id, parent_account_id, nickname, grade, region, textbook_version
+        `SELECT id, parent_account_id, nickname, grade, region,
+                province_code, province_name, city_code, city_name, textbook_version
            FROM child_profiles
           WHERE id = ? AND parent_account_id = ?`,
       )
@@ -1122,13 +1137,18 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
     this.database
       .prepare(
         `UPDATE child_profiles
-            SET nickname = ?, grade = ?, region = ?, textbook_version = ?
+            SET nickname = ?, grade = ?, region = ?, province_code = ?,
+                province_name = ?, city_code = ?, city_name = ?, textbook_version = ?
           WHERE id = ? AND parent_account_id = ?`,
       )
       .run(
         profile.nickname,
         profile.grade,
-        profile.region,
+        profile.region ?? `${profile.location!.provinceName} ${profile.location!.cityName}`,
+        profile.location?.provinceCode ?? null,
+        profile.location?.provinceName ?? null,
+        profile.location?.cityCode ?? null,
+        profile.location?.cityName ?? null,
         profile.textbookVersion ?? null,
         profile.id,
         profile.parentAccountId,
@@ -1140,7 +1160,9 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
       .prepare(
         `SELECT child_profiles.id, child_profiles.parent_account_id,
                 child_profiles.nickname, child_profiles.grade,
-                child_profiles.region, child_profiles.textbook_version
+                child_profiles.region, child_profiles.province_code,
+                child_profiles.province_name, child_profiles.city_code,
+                child_profiles.city_name, child_profiles.textbook_version
            FROM parent_accounts
            JOIN child_profiles
              ON child_profiles.id = parent_accounts.selected_child_profile_id
@@ -1177,7 +1199,36 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
       nickname: row.nickname,
       grade: row.grade,
       region: row.region,
+      ...(row.province_code && row.province_name && row.city_code && row.city_name
+        ? {
+            location: {
+              provinceCode: row.province_code,
+              provinceName: row.province_name,
+              cityCode: row.city_code,
+              cityName: row.city_name,
+            },
+          }
+        : {}),
       ...(row.textbook_version ? { textbookVersion: row.textbook_version } : {}),
     };
+  }
+
+  private migrateChildProfileLocations(): void {
+    const columns = this.database
+      .prepare("PRAGMA table_info(child_profiles)")
+      .all() as { name: string }[];
+    const names = new Set(columns.map((column) => column.name));
+
+    for (const column of [
+      "province_code TEXT",
+      "province_name TEXT",
+      "city_code TEXT",
+      "city_name TEXT",
+    ]) {
+      const name = column.split(" ")[0];
+      if (!names.has(name)) {
+        this.database.exec(`ALTER TABLE child_profiles ADD COLUMN ${column}`);
+      }
+    }
   }
 }

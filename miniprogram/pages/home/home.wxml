@@ -29,7 +29,9 @@
       </view>
       <view class="field">
         <view class="label">地区</view>
-        <input class="input" data-field="region" placeholder="如：浙江" bindinput="onInput" />
+        <picker mode="region" bindchange="onLocationChange">
+          <view class="input">{{form.regionLabel}}</view>
+        </picker>
       </view>
       <view class="field">
         <view class="label">教材版本（选填）</view>

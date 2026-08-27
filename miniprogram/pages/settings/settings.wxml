@@ -32,7 +32,9 @@
           </picker>
         </view>
         <view class="field">
-          <input class="input" data-field="region" placeholder="地区" bindinput="onInput" />
+          <picker mode="region" bindchange="onLocationChange">
+            <view class="input">{{form.regionLabel}}</view>
+          </picker>
         </view>
         <view class="field">
           <input class="input" data-field="textbookVersion" placeholder="教材版本（选填）" bindinput="onInput" />
