@@ -73,8 +73,19 @@ page {
   border: 1rpx solid #dfe2e6;
   border-radius: 8px;
   padding: 16rpx 20rpx;
+  min-height: 88rpx;
+  line-height: 56rpx;
   width: 100%;
   box-sizing: border-box;
+}
+
+input.input {
+  height: 88rpx;
+}
+
+textarea.input {
+  min-height: 120rpx;
+  line-height: 48rpx;
 }
 
 .row {
