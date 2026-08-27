@@ -262,6 +262,7 @@ export type WeaknessEntry = {
   knowledgePoint: string;
   weaknessScore: number;
   mistakeCount: number;
+  correctPracticeCount: number;
   averageMasteryScore: number;
   strugglingReviews: number;
   variantMisses: number;
@@ -1596,7 +1597,6 @@ export class LearningLoop {
       child.id,
       0,
     );
-
     return {
       stage: "ready",
       child,
@@ -1632,6 +1632,18 @@ export class LearningLoop {
       childProfileId,
       0,
     );
+    const correctPracticeByKnowledgePoint = new Map<string, number>();
+    for (const evidence of this.store.listCorrectPracticeEvidence(
+      parentAccountId,
+      childProfileId,
+    )) {
+      if (evidence.knowledgePoint) {
+        correctPracticeByKnowledgePoint.set(
+          evidence.knowledgePoint,
+          (correctPracticeByKnowledgePoint.get(evidence.knowledgePoint) ?? 0) + 1,
+        );
+      }
+    }
 
     const weekReviews = completedReviews.filter(
       (review) =>
@@ -1674,17 +1686,21 @@ export class LearningLoop {
         const variantMisses = reviews.filter(
           (review) => review.variantCorrect === false,
         ).length;
+        const correctPracticeCount =
+          correctPracticeByKnowledgePoint.get(knowledgePoint) ?? 0;
         const weaknessScore = roundToTwo(
           2 * group.length +
             2 * strugglingReviews +
             2 * variantMisses +
-            4 * (1 - averageMasteryScore),
+            4 * (1 - averageMasteryScore) -
+            correctPracticeCount,
         );
 
         return {
           knowledgePoint,
           weaknessScore,
           mistakeCount: group.length,
+          correctPracticeCount,
           averageMasteryScore: roundToTwo(averageMasteryScore),
           strugglingReviews,
           variantMisses,

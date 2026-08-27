@@ -162,3 +162,37 @@ test("the report only ever contains the authorized child's data", () => {
     /not available to this guardian/i,
   );
 });
+
+test("confirmed correct homework practice lowers the related weakness score", () => {
+  const now = Date.parse("2026-08-26T10:00:00+08:00");
+  const learningLoop = new LearningLoop(undefined, { now: () => now });
+  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
+  const mistake = saveMistake(learningLoop, guardian, child, "12 - 5 = ?", "退位减法");
+
+  const review = learningLoop.createHomeworkReview(guardian.id, child.id, {
+    questions: [{
+      stem: "8 + 7 = ?",
+      studentAnswer: "15",
+      studentAnswerConfidence: 1,
+      verdict: "correct",
+      confidence: 1,
+      answerSource: "parent",
+      referenceAnswer: "15",
+      reasoning: null,
+      suggestedPrimaryKnowledgePoint: "退位减法",
+      suggestedSecondaryKnowledgePoints: [],
+      suggestedMistakeCause: null,
+    }],
+  });
+  learningLoop.confirmHomeworkQuestion(guardian.id, review.id, review.candidates[0]!.id, {
+    verdict: "correct",
+    primaryKnowledgePoint: "退位减法",
+  });
+
+  const report = learningLoop.getWeeklyReport(guardian.id, child.id);
+  const entry = report.weaknesses.find((item) => item.knowledgePoint === "退位减法");
+  assert.ok(entry);
+  assert.equal(entry.correctPracticeCount, 1);
+  assert.equal(entry.weaknessScore, 5);
+  assert.equal(mistake.primaryKnowledgePoint, "退位减法");
+});
