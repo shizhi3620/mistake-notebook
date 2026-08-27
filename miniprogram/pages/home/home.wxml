@@ -61,6 +61,7 @@
     </view>
 
     <button class="btn btn-primary" bindtap="goCapture">拍一道题</button>
+    <button class="btn btn-plain" bindtap="goHomework">批改作业（多题）</button>
     <button class="btn btn-plain" bindtap="goReport">查看周报</button>
     <button class="btn btn-plain" bindtap="goMistakes">打开错题本</button>
 

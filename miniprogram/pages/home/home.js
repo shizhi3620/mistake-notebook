@@ -120,6 +120,10 @@ Page({
     wx.navigateTo({ url: "/pages/capture/capture" });
   },
 
+  goHomework() {
+    wx.navigateTo({ url: "/pages/homework/homework" });
+  },
+
   goReview() {
     wx.navigateTo({ url: "/pages/review/review" });
   },

@@ -1,0 +1,31 @@
+<view class="page">
+  <view wx:if="{{loading}}" class="muted">加载中…</view>
+  <block wx:elif="{{!review}}">
+    <view class="card">
+      <view class="card-title">录入作业题</view>
+      <view class="muted" style="margin-bottom: 16rpx">可先手动录入多道题，后续可接入整页图片识别。</view>
+      <view wx:for="{{questions}}" wx:key="index" class="card" style="margin: 16rpx 0; background: #f8f9fa">
+        <view class="label">第 {{index + 1}} 题</view>
+        <input class="input" data-index="{{index}}" data-field="stem" placeholder="题干" value="{{item.stem}}" bindinput="onQuestionInput" />
+        <input class="input" style="margin-top: 12rpx" data-index="{{index}}" data-field="studentAnswer" placeholder="学生答案（选填）" value="{{item.studentAnswer}}" bindinput="onQuestionInput" />
+        <picker range="{{verdicts}}" value="{{item.verdictIndex}}" data-index="{{index}}" bindchange="onVerdictChange"><view class="input" style="margin-top: 12rpx">初步判定：{{verdicts[item.verdictIndex]}}</view></picker>
+      </view>
+      <button class="btn btn-plain" bindtap="addQuestion">添加一道题</button>
+      <button class="btn btn-primary" disabled="{{saving}}" bindtap="createReview">开始批改</button>
+    </view>
+  </block>
+  <block wx:else>
+    <view class="card"><view class="card-title">逐题确认</view><view class="muted">请确认每一道题，初判不会直接进入错题本。</view></view>
+    <view wx:for="{{review.candidates}}" wx:key="id" class="card">
+      <view style="margin-bottom: 12rpx">{{index + 1}}. {{item.stem}}</view>
+      <view class="muted" style="margin-bottom: 12rpx">学生答案：{{item.studentAnswer || '未填写'}}</view>
+      <view wx:if="{{!item.confirmedVerdict}}">
+        <input class="input" data-index="{{index}}" data-field="primaryKnowledgePoint" placeholder="主知识点（错误题必填）" value="{{item.primaryKnowledgePoint}}" bindinput="onCandidateInput" />
+        <input class="input" style="margin-top: 12rpx" data-index="{{index}}" data-field="mistakeCause" placeholder="错因（选填）" value="{{item.mistakeCause}}" bindinput="onCandidateInput" />
+      </view>
+      <view wx:if="{{item.confirmedVerdict}}" class="tag tag-green">已确认：{{item.confirmedVerdict === 'correct' ? '正确' : '错误'}}</view>
+      <view wx:else class="row"><button class="btn btn-primary" style="flex: 1; margin-right: 8rpx" data-index="{{index}}" data-verdict="0" bindtap="confirmCandidate">确认正确</button><button class="btn btn-danger" style="flex: 1; margin-right: 8rpx" data-index="{{index}}" data-verdict="1" bindtap="confirmCandidate">确认错误</button><button class="btn btn-plain" style="flex: 1" data-index="{{index}}" data-verdict="2" bindtap="confirmCandidate">待确认</button></view>
+    </view>
+    <button class="btn btn-plain" bindtap="finish">完成</button>
+  </block>
+</view>

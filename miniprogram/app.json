@@ -7,7 +7,8 @@
     "pages/confirm/confirm",
     "pages/explanation/explanation",
     "pages/review/review",
-    "pages/report/report"
+    "pages/report/report",
+    "pages/homework/homework"
   ],
   "window": {
     "navigationBarBackgroundColor": "#ffffff",
