@@ -109,17 +109,22 @@ Page({
   },
 
   async createChild() {
-    const { nickname, grade, location, textbookVersion } = this.data.form;
-    if (!nickname.trim() || (!location && !this.data.form.region.trim())) {
+    const form = this.data.form || {};
+    const nickname = String(form.nickname || "").trim();
+    const region = String(form.region || "").trim();
+    const textbookVersion = String(form.textbookVersion || "").trim();
+    const grade = Number(form.grade || 0);
+    const location = form.location || null;
+    if (!nickname || (!location && !region)) {
       wx.showToast({ title: "请选择昵称、省和市", icon: "none" });
       return;
     }
     try {
       await api.request("POST", "/children", {
-        nickname: nickname.trim(),
+        nickname,
         grade,
-        ...(location ? { location } : { region: this.data.form.region.trim() }),
-        textbookVersion: textbookVersion.trim() || undefined,
+        ...(location ? { location } : { region }),
+        textbookVersion: textbookVersion || undefined,
       });
       this.setData({ showChildForm: false });
       this.load();
