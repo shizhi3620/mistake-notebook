@@ -46,7 +46,9 @@
       </view>
       <view class="field">
         <view class="label">错因（选填）</view>
-        <input class="input" data-field="cause" value="{{mistakeForm.cause}}" placeholder="如：粗心抄错数字" bindinput="onMistakeInput" />
+        <textarea class="input" auto-height maxlength="200" data-field="cause"
+                  value="{{mistakeForm.cause}}" placeholder="如：粗心抄错数字"
+                  bindinput="onMistakeInput" />
       </view>
       <button class="btn btn-primary" disabled="{{saving}}" bindtap="saveMistake">保存错题</button>
     </view>

@@ -76,8 +76,11 @@ Page({
   },
 
   async saveMistake() {
-    const { primary, secondary, cause } = this.data.mistakeForm;
-    if (!primary.trim()) {
+    const form = this.data.mistakeForm || {};
+    const primary = String(form.primary || "").trim();
+    const secondary = String(form.secondary || "");
+    const cause = String(form.cause || "").trim();
+    if (!primary) {
       wx.showToast({ title: "请填写主知识点", icon: "none" });
       return;
     }
@@ -87,12 +90,12 @@ Page({
         "POST",
         `/questions/${this.data.questionId}/mistake`,
         {
-          primaryKnowledgePoint: primary.trim(),
+          primaryKnowledgePoint: primary,
           secondaryKnowledgePoints: secondary
             .split(/[,，]/)
             .map((point) => point.trim())
             .filter(Boolean),
-          mistakeCause: cause.trim() || undefined,
+          mistakeCause: cause || undefined,
         },
       );
       this.setData({ saved: true });
