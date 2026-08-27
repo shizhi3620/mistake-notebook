@@ -3,6 +3,8 @@ import Database from "better-sqlite3";
 import type {
   ChildProfile,
   ConfirmedQuestion,
+  CorrectPracticeEvidence,
+  HomeworkReview,
   LearningLoopStore,
   LoginSession,
   MistakeRecord,
@@ -130,6 +132,24 @@ type ReminderDispatchRow = {
   status: string;
 };
 
+type HomeworkReviewRow = {
+  id: string;
+  parent_account_id: string;
+  child_profile_id: string;
+  image_key: string | null;
+  created_at: number;
+  candidates_json: string;
+};
+
+type CorrectPracticeEvidenceRow = {
+  id: string;
+  parent_account_id: string;
+  child_profile_id: string;
+  homework_review_id: string;
+  knowledge_point: string | null;
+  created_at: number;
+};
+
 export class SqliteLearningLoopStore implements LearningLoopStore {
   private readonly database: any;
 
@@ -241,6 +261,22 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
         date_key TEXT NOT NULL,
         sent_at INTEGER NOT NULL,
         status TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS homework_reviews (
+        id TEXT PRIMARY KEY,
+        parent_account_id TEXT NOT NULL,
+        child_profile_id TEXT NOT NULL,
+        image_key TEXT,
+        created_at INTEGER NOT NULL,
+        candidates_json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS correct_practice_evidence (
+        id TEXT PRIMARY KEY,
+        parent_account_id TEXT NOT NULL,
+        child_profile_id TEXT NOT NULL,
+        homework_review_id TEXT NOT NULL,
+        knowledge_point TEXT,
+        created_at INTEGER NOT NULL
       );
     `);
     this.migrateChildProfileLocations();
@@ -673,6 +709,18 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
         .run(parentAccountId, parentAccountId, childProfileId);
       this.database
         .prepare(
+          `DELETE FROM correct_practice_evidence
+            WHERE parent_account_id = ? AND child_profile_id = ?`,
+        )
+        .run(parentAccountId, childProfileId);
+      this.database
+        .prepare(
+          `DELETE FROM homework_reviews
+            WHERE parent_account_id = ? AND child_profile_id = ?`,
+        )
+        .run(parentAccountId, childProfileId);
+      this.database
+        .prepare(
           `DELETE FROM review_schedules
             WHERE parent_account_id = ? AND child_profile_id = ?`,
         )
@@ -809,6 +857,63 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
       );
   }
 
+  createHomeworkReview(review: HomeworkReview): void {
+    this.database
+      .prepare(
+        `INSERT INTO homework_reviews
+          (id, parent_account_id, child_profile_id, image_key, created_at, candidates_json)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(review.id, review.parentAccountId, review.childProfileId, review.imageKey, review.createdAt, JSON.stringify(review.candidates));
+  }
+
+  findHomeworkReview(parentAccountId: string, homeworkReviewId: string): HomeworkReview | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT id, parent_account_id, child_profile_id, image_key, created_at, candidates_json
+           FROM homework_reviews WHERE id = ? AND parent_account_id = ?`,
+      )
+      .get(homeworkReviewId, parentAccountId) as HomeworkReviewRow | undefined;
+    return row ? this.toHomeworkReview(row) : undefined;
+  }
+
+  saveHomeworkReview(review: HomeworkReview): void {
+    this.database
+      .prepare(
+        `UPDATE homework_reviews SET candidates_json = ?
+          WHERE id = ? AND parent_account_id = ?`,
+      )
+      .run(JSON.stringify(review.candidates), review.id, review.parentAccountId);
+  }
+
+  createCorrectPracticeEvidence(evidence: CorrectPracticeEvidence): void {
+    this.database
+      .prepare(
+        `INSERT INTO correct_practice_evidence
+          (id, parent_account_id, child_profile_id, homework_review_id, knowledge_point, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(evidence.id, evidence.parentAccountId, evidence.childProfileId, evidence.homeworkReviewId, evidence.knowledgePoint, evidence.createdAt);
+  }
+
+  listCorrectPracticeEvidence(parentAccountId: string, childProfileId: string): CorrectPracticeEvidence[] {
+    const rows = this.database
+      .prepare(
+        `SELECT id, parent_account_id, child_profile_id, homework_review_id, knowledge_point, created_at
+           FROM correct_practice_evidence
+          WHERE parent_account_id = ? AND child_profile_id = ? ORDER BY created_at`,
+      )
+      .all(parentAccountId, childProfileId) as CorrectPracticeEvidenceRow[];
+    return rows.map((row) => ({
+      id: row.id,
+      parentAccountId: row.parent_account_id,
+      childProfileId: row.child_profile_id,
+      homeworkReviewId: row.homework_review_id,
+      knowledgePoint: row.knowledge_point,
+      createdAt: row.created_at,
+    }));
+  }
+
   findQuestion(
     parentAccountId: string,
     questionId: string,
@@ -859,6 +964,17 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
       answerAnalysisSkipped: Boolean(row.answer_analysis_skipped),
       status: row.status as ConfirmedQuestion["status"],
       createdAt: row.created_at,
+    };
+  }
+
+  private toHomeworkReview(row: HomeworkReviewRow): HomeworkReview {
+    return {
+      id: row.id,
+      parentAccountId: row.parent_account_id,
+      childProfileId: row.child_profile_id,
+      imageKey: row.image_key,
+      createdAt: row.created_at,
+      candidates: JSON.parse(row.candidates_json),
     };
   }
 

@@ -316,6 +316,50 @@ export type ReminderDispatchOutcome = {
   status: "sent" | "failed";
 };
 
+export type HomeworkVerdict = "correct" | "incorrect" | "uncertain";
+
+export type HomeworkAnswerSource = "teacher" | "parent" | "ai";
+
+export type HomeworkQuestionCandidate = {
+  id: string;
+  stem: string;
+  studentAnswer: string | null;
+  studentAnswerConfidence: number | null;
+  verdict: HomeworkVerdict;
+  confidence: number;
+  answerSource: HomeworkAnswerSource;
+  referenceAnswer: string | null;
+  reasoning: string | null;
+  suggestedPrimaryKnowledgePoint: string | null;
+  suggestedSecondaryKnowledgePoints: string[];
+  suggestedMistakeCause: string | null;
+  confirmedVerdict: HomeworkVerdict | null;
+  questionId: string | null;
+  mistakeId: string | null;
+};
+
+export type HomeworkReview = {
+  id: string;
+  parentAccountId: string;
+  childProfileId: string;
+  imageKey: string | null;
+  createdAt: number;
+  candidates: HomeworkQuestionCandidate[];
+};
+
+export type HomeworkRecognition = {
+  questions: Omit<HomeworkQuestionCandidate, "id" | "confirmedVerdict" | "questionId" | "mistakeId">[];
+};
+
+export type CorrectPracticeEvidence = {
+  id: string;
+  parentAccountId: string;
+  childProfileId: string;
+  homeworkReviewId: string;
+  knowledgePoint: string | null;
+  createdAt: number;
+};
+
 export interface LearningLoopStore {
   createParentAccount(account: ParentAccount): void;
   findParentAccount(parentAccountId: string): ParentAccount | undefined;
@@ -389,6 +433,17 @@ export interface LearningLoopStore {
     childProfileId: string,
     dateKey: string,
   ): ReminderDispatch | undefined;
+  createHomeworkReview(review: HomeworkReview): void;
+  findHomeworkReview(
+    parentAccountId: string,
+    homeworkReviewId: string,
+  ): HomeworkReview | undefined;
+  saveHomeworkReview(review: HomeworkReview): void;
+  createCorrectPracticeEvidence(evidence: CorrectPracticeEvidence): void;
+  listCorrectPracticeEvidence(
+    parentAccountId: string,
+    childProfileId: string,
+  ): CorrectPracticeEvidence[];
   createChildProfile(profile: ChildProfile): void;
   listChildProfiles(parentAccountId: string): ChildProfile[];
   findChildProfile(
@@ -410,6 +465,8 @@ class InMemoryLearningLoopStore implements LearningLoopStore {
   private readonly reviewSchedules = new Map<string, ReviewSchedule>();
   private readonly reviews = new Map<string, Review>();
   private readonly childProfiles = new Map<string, ChildProfile>();
+  private readonly homeworkReviews = new Map<string, HomeworkReview>();
+  private readonly correctPracticeEvidence = new Map<string, CorrectPracticeEvidence>();
   private readonly selectedChildProfileIds = new Map<string, string>();
 
   createParentAccount(account: ParentAccount): void {
@@ -601,6 +658,17 @@ class InMemoryLearningLoopStore implements LearningLoopStore {
       }
     }
 
+    for (const [reviewId, review] of this.homeworkReviews) {
+      if (review.parentAccountId === parentAccountId && review.childProfileId === childProfileId) {
+        this.homeworkReviews.delete(reviewId);
+      }
+    }
+    for (const [evidenceId, evidence] of this.correctPracticeEvidence) {
+      if (evidence.parentAccountId === parentAccountId && evidence.childProfileId === childProfileId) {
+        this.correctPracticeEvidence.delete(evidenceId);
+      }
+    }
+
     this.childProfiles.delete(childProfileId);
 
     if (this.selectedChildProfileIds.get(parentAccountId) === childProfileId) {
@@ -746,6 +814,29 @@ class InMemoryLearningLoopStore implements LearningLoopStore {
   ): ReminderDispatch | undefined {
     return this.reminderDispatches.get(
       `${parentAccountId}:${childProfileId}:${dateKey}`,
+    );
+  }
+
+  createHomeworkReview(review: HomeworkReview): void {
+    this.homeworkReviews.set(review.id, review);
+  }
+
+  findHomeworkReview(parentAccountId: string, homeworkReviewId: string): HomeworkReview | undefined {
+    const review = this.homeworkReviews.get(homeworkReviewId);
+    return review?.parentAccountId === parentAccountId ? review : undefined;
+  }
+
+  saveHomeworkReview(review: HomeworkReview): void {
+    this.homeworkReviews.set(review.id, review);
+  }
+
+  createCorrectPracticeEvidence(evidence: CorrectPracticeEvidence): void {
+    this.correctPracticeEvidence.set(evidence.id, evidence);
+  }
+
+  listCorrectPracticeEvidence(parentAccountId: string, childProfileId: string): CorrectPracticeEvidence[] {
+    return [...this.correctPracticeEvidence.values()].filter(
+      (evidence) => evidence.parentAccountId === parentAccountId && evidence.childProfileId === childProfileId,
     );
   }
 
@@ -1166,6 +1257,137 @@ export class LearningLoop {
     this.store.createQuestion(question);
     this.store.deleteQuestionDraft(parentAccountId, draftId);
     return question;
+  }
+
+  createHomeworkReview(
+    parentAccountId: string,
+    childProfileId: string,
+    recognition: HomeworkRecognition,
+  ): HomeworkReview {
+    this.findChildProfileForGuardian(parentAccountId, childProfileId);
+    if (!Array.isArray(recognition.questions) || recognition.questions.length === 0) {
+      throw new Error("A homework review must contain at least one math question.");
+    }
+
+    const candidates = recognition.questions.map((question) => {
+      if (!question.stem?.trim()) {
+        throw new Error("Each homework question needs a stem.");
+      }
+      if (!Number.isFinite(question.confidence) || question.confidence < 0 || question.confidence > 1) {
+        throw new Error("Homework recognition confidence must be between 0 and 1.");
+      }
+      if (question.studentAnswerConfidence !== null &&
+        (!Number.isFinite(question.studentAnswerConfidence) || question.studentAnswerConfidence < 0 || question.studentAnswerConfidence > 1)) {
+        throw new Error("Handwritten answer confidence must be between 0 and 1.");
+      }
+      if (question.suggestedSecondaryKnowledgePoints.length > 2) {
+        throw new Error("At most two secondary knowledge points may be suggested.");
+      }
+      return {
+        ...question,
+        id: randomUUID(),
+        stem: question.stem.trim(),
+        studentAnswer: question.studentAnswer?.trim() || null,
+        referenceAnswer: question.referenceAnswer?.trim() || null,
+        reasoning: question.reasoning?.trim() || null,
+        suggestedPrimaryKnowledgePoint:
+          question.suggestedPrimaryKnowledgePoint?.trim() || null,
+        suggestedSecondaryKnowledgePoints: question.suggestedSecondaryKnowledgePoints
+          .map((point) => point.trim())
+          .filter(Boolean),
+        suggestedMistakeCause: question.suggestedMistakeCause?.trim() || null,
+        confirmedVerdict: null,
+        questionId: null,
+        mistakeId: null,
+      };
+    });
+
+    const review: HomeworkReview = {
+      id: randomUUID(),
+      parentAccountId,
+      childProfileId,
+      imageKey: null,
+      createdAt: this.now(),
+      candidates,
+    };
+    this.store.createHomeworkReview(review);
+    return review;
+  }
+
+  getHomeworkReview(parentAccountId: string, homeworkReviewId: string): HomeworkReview {
+    return this.findHomeworkReviewForGuardian(parentAccountId, homeworkReviewId);
+  }
+
+  confirmHomeworkQuestion(
+    parentAccountId: string,
+    homeworkReviewId: string,
+    candidateId: string,
+    confirmation: {
+      verdict: HomeworkVerdict;
+      stem?: string;
+      studentAnswer?: string | null;
+      primaryKnowledgePoint?: string;
+      secondaryKnowledgePoints?: string[];
+      mistakeCause?: string | null;
+    },
+  ): HomeworkQuestionCandidate {
+    const review = this.findHomeworkReviewForGuardian(parentAccountId, homeworkReviewId);
+    const candidate = review.candidates.find((entry) => entry.id === candidateId);
+    if (!candidate) throw new Error("Homework question is not available to this guardian.");
+    if (candidate.confirmedVerdict !== null) return candidate;
+
+    if (!(["correct", "incorrect", "uncertain"] as const).includes(confirmation.verdict)) {
+      throw new Error("Homework verdict must be correct, incorrect, or uncertain.");
+    }
+
+    candidate.confirmedVerdict = confirmation.verdict;
+    candidate.stem = confirmation.stem?.trim() || candidate.stem;
+    if (confirmation.studentAnswer !== undefined) {
+      candidate.studentAnswer = confirmation.studentAnswer?.trim() || null;
+    }
+    const primary = confirmation.primaryKnowledgePoint?.trim() || candidate.suggestedPrimaryKnowledgePoint;
+    const secondary = (confirmation.secondaryKnowledgePoints ?? candidate.suggestedSecondaryKnowledgePoints)
+      .map((point) => point.trim()).filter(Boolean).slice(0, 2);
+    const cause = confirmation.mistakeCause?.trim() || candidate.suggestedMistakeCause;
+
+    if (confirmation.verdict === "incorrect") {
+      if (!primary) throw new Error("An incorrect homework question needs a confirmed primary knowledge point.");
+      const account = this.store.findParentAccount(parentAccountId)!;
+      const photosUsed = this.store.countQuestionsSince(
+        parentAccountId,
+        shanghaiMonthStart(this.now()),
+      );
+      if (photosUsed >= PLAN_ENTITLEMENTS[account.plan].monthlyPhotoQuota) {
+        throw new Error(
+          `本月拍题额度已用完（${PLAN_ENTITLEMENTS[account.plan].monthlyPhotoQuota} 道）；升级订阅可获得更高额度，或等待下月额度重置。`,
+        );
+      }
+      const question: ConfirmedQuestion = {
+        id: randomUUID(), parentAccountId, childProfileId: review.childProfileId,
+        source: "camera", stem: candidate.stem, formulas: [], imageKey: null,
+        crop: null, rotationDegrees: 0, region: null,
+        studentAnswer: candidate.studentAnswer, answerAnalysisSkipped: false,
+        status: "confirmed", createdAt: this.now(),
+      };
+      this.store.createQuestion(question);
+      const mistake = this.saveMistake(parentAccountId, question.id, {
+        primaryKnowledgePoint: primary,
+        secondaryKnowledgePoints: secondary,
+        mistakeCause: cause ?? undefined,
+      });
+      candidate.questionId = question.id;
+      candidate.mistakeId = mistake.id;
+    }
+    if (confirmation.verdict === "correct") {
+      this.store.createCorrectPracticeEvidence({
+        id: randomUUID(), parentAccountId, childProfileId: review.childProfileId,
+        homeworkReviewId: review.id,
+        knowledgePoint: primary,
+        createdAt: this.now(),
+      });
+    }
+    this.store.saveHomeworkReview(review);
+    return candidate;
   }
 
   confirmGuardianship(parentAccountId: string): ParentAccount {
@@ -2228,6 +2450,21 @@ export class LearningLoop {
     }
 
     return question;
+  }
+
+  private findHomeworkReviewForGuardian(
+    parentAccountId: string,
+    homeworkReviewId: string,
+  ): HomeworkReview {
+    const account = this.store.findParentAccount(parentAccountId);
+    if (!account) {
+      throw new Error("Parent account was not found.");
+    }
+    const review = this.store.findHomeworkReview(parentAccountId, homeworkReviewId);
+    if (!review) {
+      throw new Error("Homework review is not available to this guardian.");
+    }
+    return review;
   }
 
   private validateCropRegion(crop: CropRegion): void {

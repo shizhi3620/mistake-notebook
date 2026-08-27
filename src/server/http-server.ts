@@ -100,6 +100,17 @@ export function createLearningLoopServer(
         ),
       );
     }
+    if (method === "POST" && route === "/homework-reviews") {
+      return send(
+        response,
+        200,
+        learningLoop.createHomeworkReview(
+          auth,
+          String(body?.childProfileId),
+          body?.recognition,
+        ),
+      );
+    }
     if (method === "POST" && route === "/reviews") {
       return send(
         response,
@@ -241,6 +252,38 @@ export function createLearningLoopServer(
           stem: String(body?.stem ?? ""),
           studentAnswer: body?.studentAnswer,
         }),
+      );
+    }
+
+    const homeworkReviewMatch = match(route, "/homework-reviews/:id");
+    if (method === "GET" && homeworkReviewMatch) {
+      return send(
+        response,
+        200,
+        learningLoop.getHomeworkReview(auth, homeworkReviewMatch.id),
+      );
+    }
+    const homeworkQuestionConfirmMatch = match(
+      route,
+      "/homework-reviews/:reviewId/questions/:candidateId/confirm",
+    );
+    if (method === "POST" && homeworkQuestionConfirmMatch) {
+      return send(
+        response,
+        200,
+        learningLoop.confirmHomeworkQuestion(
+          auth,
+          homeworkQuestionConfirmMatch.reviewId,
+          homeworkQuestionConfirmMatch.candidateId,
+          {
+            verdict: body?.verdict,
+            stem: body?.stem,
+            studentAnswer: body?.studentAnswer,
+            primaryKnowledgePoint: body?.primaryKnowledgePoint,
+            secondaryKnowledgePoints: body?.secondaryKnowledgePoints,
+            mistakeCause: body?.mistakeCause,
+          },
+        ),
       );
     }
 

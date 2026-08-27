@@ -197,3 +197,92 @@ test("the HTTP API carries a family through the full learning loop", async () =>
     assert.equal(entitlements.body.plan, "free");
   });
 });
+
+test("the HTTP API keeps homework grading pending until a guardian confirms each question", async () => {
+  await withServer(async (api) => {
+    const login = await api.call("POST", "/session", {
+      body: { code: "homework-grading-login" },
+    });
+    const token = login.body.session.token as string;
+    await api.call("POST", "/guardianship/confirm", { token });
+    const child = await api.call("POST", "/children", {
+      token,
+      body: { nickname: "小红", grade: 4, region: "上海" },
+    });
+
+    const created = await api.call("POST", "/homework-reviews", {
+      token,
+      body: {
+        childProfileId: child.body.id,
+        recognition: {
+          questions: [
+            {
+              stem: "8 + 7 = ?",
+              studentAnswer: "15",
+              studentAnswerConfidence: 0.97,
+              verdict: "correct",
+              confidence: 0.96,
+              answerSource: "ai",
+              referenceAnswer: "15",
+              reasoning: "8 + 7 = 15",
+              suggestedPrimaryKnowledgePoint: "20以内进位加法",
+              suggestedSecondaryKnowledgePoints: [],
+              suggestedMistakeCause: null,
+            },
+            {
+              stem: "12 - 5 = ?",
+              studentAnswer: "8",
+              studentAnswerConfidence: 0.94,
+              verdict: "incorrect",
+              confidence: 0.95,
+              answerSource: "teacher",
+              referenceAnswer: "7",
+              reasoning: "12 - 5 = 7",
+              suggestedPrimaryKnowledgePoint: "20以内退位减法",
+              suggestedSecondaryKnowledgePoints: [],
+              suggestedMistakeCause: "计算粗心",
+            },
+          ],
+        },
+      },
+    });
+    assert.equal(created.status, 200);
+    const [correctCandidate, incorrectCandidate] = created.body.candidates;
+    assert.equal(correctCandidate.confirmedVerdict, null);
+
+    const confirmedCorrect = await api.call(
+      "POST",
+      `/homework-reviews/${created.body.id}/questions/${correctCandidate.id}/confirm`,
+      { token, body: { verdict: "correct" } },
+    );
+    assert.equal(confirmedCorrect.body.confirmedVerdict, "correct");
+    assert.equal(confirmedCorrect.body.mistakeId, null);
+
+    const confirmedIncorrect = await api.call(
+      "POST",
+      `/homework-reviews/${created.body.id}/questions/${incorrectCandidate.id}/confirm`,
+      {
+        token,
+        body: {
+          verdict: "incorrect",
+          primaryKnowledgePoint: "20以内退位减法",
+          mistakeCause: "计算粗心",
+        },
+      },
+    );
+    assert.equal(confirmedIncorrect.body.confirmedVerdict, "incorrect");
+    assert.ok(confirmedIncorrect.body.mistakeId);
+
+    const mistakes = await api.call(
+      "GET",
+      `/mistakes?childProfileId=${child.body.id}`,
+      { token },
+    );
+    assert.equal(mistakes.body.length, 1);
+
+    const review = await api.call("GET", `/homework-reviews/${created.body.id}`, { token });
+    assert.equal(review.status, 200);
+    assert.equal(review.body.candidates[0].confirmedVerdict, "correct");
+    assert.equal(review.body.candidates[1].mistakeId, confirmedIncorrect.body.mistakeId);
+  });
+});
