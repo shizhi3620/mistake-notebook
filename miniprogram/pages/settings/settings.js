@@ -54,7 +54,7 @@ Page({
       await api.request("POST", `/children/${id}/select`);
       this.setData({ selectedChildId: id });
       wx.showToast({ title: "已切换", icon: "success" });
-    } catch (error) {
+  } catch (error) {
       wx.showToast({ title: error.message, icon: "none" });
     }
   },
@@ -129,7 +129,7 @@ Page({
       this.setData({ showChildForm: false });
       this.load();
     } catch (error) {
-      wx.showToast({ title: error.message, icon: "none" });
+      wx.showToast({ title: error && error.message ? error.message : "创建失败，请稍后重试", icon: "none" });
     }
   },
 

@@ -2497,16 +2497,20 @@ export class LearningLoop {
     }
   }
 
-  private validateChildProfile(profile: ChildProfileInput): void {
-    if (!profile.nickname.trim()) {
+  private validateChildProfile(profile: ChildProfileInput | undefined | null): void {
+    if (!profile) {
+      throw new Error("A child profile is required.");
+    }
+    const nickname = typeof profile?.nickname === "string" ? profile.nickname.trim() : "";
+    if (!nickname) {
       throw new Error("A child profile nickname is required.");
     }
 
-    if (!Number.isInteger(profile.grade) || profile.grade < 1 || profile.grade > 9) {
+    if (!Number.isInteger(profile?.grade) || profile.grade < 1 || profile.grade > 9) {
       throw new Error("A child profile grade must be from one to nine.");
     }
 
-    if (profile.location) {
+    if (profile?.location) {
       const { provinceCode, provinceName, cityCode, cityName } = profile.location;
       if (
         !/^\d{6}$/.test(provinceCode) ||
@@ -2519,7 +2523,7 @@ export class LearningLoop {
       return;
     }
 
-    if (!profile.region?.trim()) {
+    if (!profile?.region || typeof profile.region !== "string" || !profile.region.trim()) {
       throw new Error("A child profile province and city are required.");
     }
   }

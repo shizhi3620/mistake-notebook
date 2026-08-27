@@ -198,6 +198,18 @@ test("the HTTP API carries a family through the full learning loop", async () =>
   });
 });
 
+test("creating a child with an incomplete payload returns a readable validation error", async () => {
+  await withServer(async (api) => {
+    const login = await api.call("POST", "/session", { body: { code: "validation-login" } });
+    const token = login.body.session.token as string;
+    await api.call("POST", "/guardianship/confirm", { token });
+    const response = await api.call("POST", "/children", { token, body: {} });
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /nickname/i);
+    assert.doesNotMatch(response.body.error, /undefined\.trim/i);
+  });
+});
+
 test("the HTTP API keeps homework grading pending until a guardian confirms each question", async () => {
   await withServer(async (api) => {
     const login = await api.call("POST", "/session", {

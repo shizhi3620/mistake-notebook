@@ -63,7 +63,7 @@ Page({
       const account = await api.request("POST", "/guardianship/confirm");
       app.globalData.account = account;
       this.load();
-    } catch (error) {
+  } catch (error) {
       wx.showToast({ title: error.message, icon: "none" });
     }
   },
@@ -116,7 +116,7 @@ Page({
       wx.showToast({ title: "档案已创建", icon: "success" });
       this.load();
     } catch (error) {
-      wx.showToast({ title: error.message, icon: "none" });
+      wx.showToast({ title: error && error.message ? error.message : "创建失败，请稍后重试", icon: "none" });
     } finally {
       this.setData({ saving: false });
     }
