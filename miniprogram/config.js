@@ -8,5 +8,6 @@ if (typeof apiBase !== "string" || !apiBase.startsWith("https://")) {
 }
 
 module.exports = {
+  cloudEnv: "prod-d8giqy4sjc5925f68",
   apiBase,
 };

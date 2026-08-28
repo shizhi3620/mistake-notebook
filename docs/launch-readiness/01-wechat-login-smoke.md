@@ -3,6 +3,7 @@
 Run this checklist only against the controlled beta environment with a registered HTTPS API domain and a test WeChat account. Use fictional child data.
 
 - [ ] Configure `WECHAT_APP_ID` and `WECHAT_APP_SECRET` in the service environment.
+- [x] Configure the CloudBase environment ID `prod-d8giqy4sjc5925f68` for the mini program.
 - [ ] Generate the ignored mini-program configuration with registered HTTPS API domains.
 - [ ] Enable URL validation in WeChat Developer Tools and verify the configured domain is accepted.
 - [ ] Upload the beta build with the authorized AppID and open it on a physical device.

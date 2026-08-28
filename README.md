@@ -32,7 +32,7 @@ MINIPROGRAM_RELEASE_API_BASE=https://api.example.com/api \\
 npm run configure:miniprogram
 ```
 
-该命令生成 Git 忽略的 `miniprogram/config.private.js`；小程序会按环境读取对应域名，且已启用微信合法域名校验。真实 AppID、AppSecret、生产地址和本地调试地址均不得提交到仓库。真机登录验收步骤见 `docs/launch-readiness/01-wechat-login-smoke.md`。
+该命令生成 Git 忽略的 `miniprogram/config.private.js`；小程序会按环境读取对应域名并初始化 CloudBase 环境 `prod-d8giqy4sjc5925f68`，且已启用微信合法域名校验。真实 AppID、AppSecret、生产地址和本地调试地址均不得提交到仓库。真机登录验收步骤见 `docs/launch-readiness/01-wechat-login-smoke.md`。
 
 ## 测试
 
