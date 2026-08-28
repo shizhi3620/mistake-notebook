@@ -43,6 +43,7 @@ const learningLoop = new LearningLoop(
 const server = createLearningLoopServer({
   learningLoop,
   recognitionClient,
+  log: (event) => console.log(JSON.stringify(event)),
   weChatIdentityResolver: createWeChatIdentityResolver({
     appId: weChatAppId,
     appSecret: weChatAppSecret,

@@ -221,6 +221,37 @@ test("the HTTP API exchanges a WeChat code and restores the same guardian", asyn
   });
 });
 
+test("operations endpoints expose health and redact request logs", async () => {
+  const events: Array<Record<string, unknown>> = [];
+  const learningLoop = new LearningLoop();
+  const server = createLearningLoopServer({
+    learningLoop,
+    log: (event) => events.push(event),
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+
+  try {
+    const health = await fetch(`http://127.0.0.1:${port}/healthz`);
+    assert.equal(health.status, 200);
+    assert.deepEqual(await health.json(), { status: "ok" });
+    assert.match(health.headers.get("x-request-id") ?? "", /^[0-9a-f-]{36}$/i);
+
+    await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: "sensitive-wechat-code" }),
+    });
+
+    assert.equal(events.length, 2);
+    assert.equal(events[1]?.path, "/api/session");
+    assert.equal(JSON.stringify(events).includes("sensitive-wechat-code"), false);
+  } finally {
+    server.close();
+  }
+});
+
 test("creating a child with an incomplete payload returns a readable validation error", async () => {
   await withServer(async (api) => {
     const login = await api.call("POST", "/session", { body: { code: "validation-login" } });

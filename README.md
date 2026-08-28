@@ -38,5 +38,9 @@ npm run configure:miniprogram
 
 ```bash
 npm run check   # tsc --noEmit
-npm test        # 43 个测试：领域层、适配器（注入 fetch）、HTTP 金路径
+npm test        # 53 个测试：领域层、适配器（注入 fetch）、HTTP 金路径
 ```
+
+## 受控内测部署
+
+`compose.yaml` 将 SQLite 数据库置于持久化 Docker volume，并只绑定本机端口；生产环境需要由已配置 TLS 的反向代理暴露登记的 HTTPS 域名。健康检查路径为 `/healthz`，运行、备份恢复和回滚步骤见 `docs/launch-readiness/02-operations-runbook.md`。

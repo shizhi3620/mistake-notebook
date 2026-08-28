@@ -1,4 +1,7 @@
 import {
+  randomUUID,
+} from "node:crypto";
+import {
   createServer,
   type IncomingMessage,
   type Server,
@@ -13,6 +16,7 @@ import type {
 
 export type LearningLoopServerDependencies = {
   learningLoop: LearningLoop;
+  log?: (event: HttpRequestLogEvent) => void;
   weChatIdentityResolver?: (
     temporaryCode: string,
   ) => Promise<{ subject: string }>;
@@ -21,12 +25,36 @@ export type LearningLoopServerDependencies = {
   }) => Promise<QuestionRecognition>;
 };
 
+export type HttpRequestLogEvent = {
+  event: "http_request";
+  requestId: string;
+  method: string;
+  path: string;
+  status: number;
+  durationMs: number;
+};
+
 export function createLearningLoopServer(
   dependencies: LearningLoopServerDependencies,
 ): Server {
   const { learningLoop, recognitionClient, weChatIdentityResolver } = dependencies;
+  const log = dependencies.log ?? (() => {});
 
   return createServer((request, response) => {
+    const requestId = randomUUID();
+    const startedAt = Date.now();
+    const url = new URL(request.url ?? "/", "http://localhost");
+    response.setHeader("x-request-id", requestId);
+    response.once("finish", () => {
+      log({
+        event: "http_request",
+        requestId,
+        method: request.method ?? "GET",
+        path: url.pathname,
+        status: response.statusCode,
+        durationMs: Date.now() - startedAt,
+      });
+    });
     void handle(request, response).catch((error: unknown) => {
       const message =
         error instanceof Error ? error.message : "Unexpected server error.";
@@ -42,6 +70,11 @@ export function createLearningLoopServer(
     const url = new URL(request.url ?? "/", "http://localhost");
     const path = url.pathname.replace(/\/+$/, "") || "/";
     const method = request.method ?? "GET";
+
+    if (method === "GET" && path === "/healthz") {
+      send(response, 200, { status: "ok" });
+      return;
+    }
 
     if (!path.startsWith("/api/")) {
       send(response, 404, { error: "Not found." });
@@ -357,6 +390,7 @@ export function createLearningLoopServer(
     send(response, 404, { error: "Not found." });
   }
 }
+
 
 function match(
   route: string,
