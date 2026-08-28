@@ -55,7 +55,11 @@ const server = createLearningLoopServer({
     appId: weChatAppId,
     appSecret: weChatAppSecret,
     onVerificationFailure: (details) =>
-      console.warn(JSON.stringify({ event: "wechat_login_verification_failed", ...details })),
+      console.warn(
+        `[wechat_login_verification_failed] status=${String(details.status ?? "network")} ` +
+          `errcode=${String(details.errcode ?? "unknown")} ` +
+          `errmsg=${String(details.errmsg ?? "unknown")}`,
+      ),
   }),
 });
 
