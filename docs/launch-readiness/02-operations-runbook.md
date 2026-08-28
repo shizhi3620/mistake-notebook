@@ -3,9 +3,11 @@
 ## Deploy
 
 1. Create a CloudBase environment and deploy the HTTP container to Cloud Hosting.
-2. Configure `WECHAT_APP_ID`, `WECHAT_APP_SECRET`, `DEEPSEEK_API_KEY` (when AI is enabled), and database credentials as Cloud Hosting secrets.
+2. Configure `WECHAT_APP_ID`, `WECHAT_APP_SECRET`, `DEEPSEEK_API_KEY` (when AI is enabled), and `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_SSL=true` as Cloud Hosting secrets.
 3. Confirm `GET /healthz` through the registered Cloud Hosting HTTPS path.
 4. Configure alerts from JSON request logs: any sustained HTTP 5xx rate or failed health probe pages the release owner.
+
+The Cloud Hosting process must set `CLOUD_HOSTING=true`. It refuses to start without a complete MySQL configuration; SQLite is for local development and migration only.
 
 ## Backup And Restore Drill
 

@@ -13,9 +13,16 @@ import { createLearningLoopServer } from "./http-server.ts";
 const deepSeekApiKey = process.env.DEEPSEEK_API_KEY;
 const weChatAppId = requiredEnvironment("WECHAT_APP_ID");
 const weChatAppSecret = requiredEnvironment("WECHAT_APP_SECRET");
+const mysqlConfig = readMysqlConfig();
 const port = Number(process.env.PORT ?? 3000);
 const databasePath =
   process.env.DATABASE_PATH ?? new URL("../../data/learning.db", import.meta.url).pathname;
+
+if (process.env.CLOUD_HOSTING === "true" && !mysqlConfig) {
+  throw new Error(
+    "MYSQL_HOST, MYSQL_DATABASE, MYSQL_USER, and MYSQL_PASSWORD are required in Cloud Hosting.",
+  );
+}
 
 mkdirSync(dirname(databasePath), { recursive: true });
 
@@ -89,4 +96,38 @@ function requiredEnvironment(key: string): string {
     throw new Error(`${key} must be configured before starting the server.`);
   }
   return value;
+}
+
+function readMysqlConfig(): {
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: string;
+  ssl: boolean;
+} | undefined {
+  const values = [
+    process.env.MYSQL_HOST,
+    process.env.MYSQL_DATABASE,
+    process.env.MYSQL_USER,
+    process.env.MYSQL_PASSWORD,
+  ];
+  if (values.every((value) => !value?.trim())) return undefined;
+  if (values.some((value) => !value?.trim())) {
+    throw new Error(
+      "MYSQL_HOST, MYSQL_DATABASE, MYSQL_USER, and MYSQL_PASSWORD must be configured together.",
+    );
+  }
+  const port = Number(process.env.MYSQL_PORT ?? 3306);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("MYSQL_PORT must be a valid TCP port.");
+  }
+  return {
+    host: process.env.MYSQL_HOST!.trim(),
+    port,
+    database: process.env.MYSQL_DATABASE!.trim(),
+    user: process.env.MYSQL_USER!.trim(),
+    password: process.env.MYSQL_PASSWORD!,
+    ssl: process.env.MYSQL_SSL !== "false",
+  };
 }
