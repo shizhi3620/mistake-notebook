@@ -38,7 +38,7 @@ npm run configure:miniprogram
 
 ```bash
 npm run check   # tsc --noEmit
-npm test        # 53 个测试：领域层、适配器（注入 fetch）、HTTP 金路径
+npm test        # 53 个测试：领域层、适配器（注入 fetch）、HTTP 全路径
 ```
 
 ## 受控内测部署
