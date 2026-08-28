@@ -6,6 +6,7 @@ loadDotEnv();
 import { createOpenAiCompatibleExplanationProvider } from "../adapters/openai-compatible-explanation.ts";
 import { createOpenAiCompatibleRecognitionClient } from "../adapters/openai-compatible-recognition.ts";
 import { createWeChatIdentityResolver } from "../adapters/wechat-login.ts";
+import { createCloudBaseNodeStorageVerifier } from "../adapters/cloudbase-storage.ts";
 import { LearningLoop } from "../learning-loop.ts";
 import { SqliteLearningLoopStore } from "../sqlite-learning-loop-store.ts";
 import { createLearningLoopServer } from "./http-server.ts";
@@ -46,9 +47,16 @@ const learningLoop = new LearningLoop(
   new SqliteLearningLoopStore(databasePath),
   { explanationProvider },
 );
+const photoStorage = process.env.CLOUDBASE_ENV
+  ? createCloudBaseNodeStorageVerifier({
+      env: process.env.CLOUDBASE_ENV,
+      region: process.env.CLOUDBASE_REGION ?? "ap-shanghai",
+    })
+  : undefined;
 
 const server = createLearningLoopServer({
   learningLoop,
+  photoStorage,
   recognitionClient,
   log: (event) => console.log(JSON.stringify(event)),
   weChatIdentityResolver: createWeChatIdentityResolver({

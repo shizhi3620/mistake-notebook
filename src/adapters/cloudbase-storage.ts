@@ -17,3 +17,32 @@ export function createCloudBaseStorageVerifier(options: {
     },
   };
 }
+
+export function createCloudBaseNodeStorageVerifier(options: {
+  env: string;
+  region?: string;
+}) {
+  return createCloudBaseStorageVerifier({
+    getTemporaryUrl: async (fileId) => {
+      const moduleName = "@cloudbase/node-sdk";
+      const cloudbaseModule = (await import(moduleName)) as {
+        default: { init(config: { env: string; region?: string }): CloudBaseApp };
+      };
+      const cloudbase = cloudbaseModule.default;
+      const app = cloudbase.init({ env: options.env, region: options.region });
+      const result = await app.getTempFileURL({ fileList: [fileId] });
+      const file = result.fileList[0];
+      if (!file || file.code !== "SUCCESS") {
+        throw new Error("Uploaded photo temporary URL could not be created.");
+      }
+      return file.tempFileURL;
+    },
+  });
+}
+
+type CloudBaseApp = {
+  init(config: { env: string; region?: string }): CloudBaseApp;
+  getTempFileURL(input: { fileList: string[] }): Promise<{
+    fileList: Array<{ code: string; tempFileURL: string }>;
+  }>;
+};

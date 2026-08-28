@@ -29,7 +29,7 @@
       </view>
       <view class="field">
         <view class="label">地区</view>
-        <picker mode="region" bindchange="onLocationChange">
+        <picker mode="region" fields="city" bindchange="onLocationChange">
           <view class="input">{{form.regionLabel}}</view>
         </picker>
       </view>

@@ -32,7 +32,7 @@
           </picker>
         </view>
         <view class="field">
-          <picker mode="region" bindchange="onLocationChange">
+        <picker mode="region" fields="city" bindchange="onLocationChange">
             <view class="input">{{form.regionLabel}}</view>
           </picker>
         </view>
