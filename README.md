@@ -43,4 +43,4 @@ npm test        # 53 个测试：领域层、适配器（注入 fetch）、HTTP 
 
 ## 受控内测部署
 
-`compose.yaml` 将 SQLite 数据库置于持久化 Docker volume，并只绑定本机端口；生产环境需要由已配置 TLS 的反向代理暴露登记的 HTTPS 域名。健康检查路径为 `/healthz`，运行、备份恢复和回滚步骤见 `docs/launch-readiness/02-operations-runbook.md`。
+`compose.yaml` 仅用于本地开发。受控内测部署目标是微信云托管，学习数据迁移至腾讯云 MySQL，照片使用 CloudBase 云存储；健康检查路径为 `/healthz`。运行、备份恢复和回滚步骤见 `docs/launch-readiness/02-operations-runbook.md`，平台决策依据见 `docs/research/wechat-cloudbase-launch.md`。
