@@ -29,5 +29,5 @@ npm start                          # http://127.0.0.1:3000
 
 ```bash
 npm run check   # tsc --noEmit
-npm test        # 43 个测试：领域层、适配器（注入 fetch）、HTTP 金路径
+npm test        # 43 个测试：领域层、适配器（注入 fetch）、HTTP 全路径
 ```
