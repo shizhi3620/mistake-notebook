@@ -196,7 +196,7 @@ banner "微信开发者工具 · 真实测试向导"
 # ── Stage 1: 环境与 DeepSeek Key ──────────────────────────────────────────
 stage "环境检查与 DeepSeek Key"
 if ! command -v node >/dev/null 2>&1; then
-  warn "未找到 node。请先安装 Node.js 20+：https://nodejs.org"
+    warn "未找到 node。请先安装 Node.js 22+：https://nodejs.org"
   exit 1
 fi
 NODE_MAJOR=$(node -e 'console.log(process.versions.node.split(".")[0])')
