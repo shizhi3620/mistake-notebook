@@ -21,9 +21,18 @@ export DEEPSEEK_API_KEY="sk-..."   # 讲解与识别（可选，不设置则禁�
 npm start                          # http://127.0.0.1:3000
 ```
 
-环境变量：`PORT`（默认 3000）、`DATABASE_PATH`、`LLM_BASE_URL`、`EXPLANATION_MODEL`、`RECOGNITION_MODEL`。
+环境变量：`WECHAT_APP_ID`、`WECHAT_APP_SECRET`（启动服务必需），以及 `PORT`（默认 3000）、`DATABASE_PATH`、`LLM_BASE_URL`、`EXPLANATION_MODEL`、`RECOGNITION_MODEL`。`DEEPSEEK_API_KEY` 仍可选；未设置时题目识别与讲解不可用。
 
-小程序端：用微信开发者工具打开 `miniprogram/`（已关闭 urlCheck 便于本地调试），在本地 `project.config.json` 填入已获授权的小程序 AppID，`config.js` 中的 `apiBase` 指向上述服务。正式环境需替换为 HTTPS 域名并配置小程序合法域名。真实 AppID 不得提交到仓库。
+小程序端：用微信开发者工具打开 `miniprogram/`，在本地 `project.private.config.json` 填入已获授权的小程序 AppID。为开发、体验和正式环境配置已登记的 HTTPS API 域名后，执行：
+
+```bash
+MINIPROGRAM_DEVELOP_API_BASE=https://dev-api.example.com/api \\
+MINIPROGRAM_TRIAL_API_BASE=https://trial-api.example.com/api \\
+MINIPROGRAM_RELEASE_API_BASE=https://api.example.com/api \\
+npm run configure:miniprogram
+```
+
+该命令生成 Git 忽略的 `miniprogram/config.private.js`；小程序会按环境读取对应域名，且已启用微信合法域名校验。真实 AppID、AppSecret、生产地址和本地调试地址均不得提交到仓库。真机登录验收步骤见 `docs/launch-readiness/01-wechat-login-smoke.md`。
 
 ## 测试
 

@@ -225,6 +225,28 @@ test("login issues an expiring session without exposing the WeChat credential", 
   assert.deepEqual(learningLoop.resumeSession(login.session.token), login.account);
 });
 
+test("a WeChat identity restores its persisted guardian account", () => {
+  const learningLoop = new LearningLoop();
+  const firstLogin = learningLoop.startWeChatLogin("openid-guardian");
+  learningLoop.confirmGuardianship(firstLogin.account.id);
+
+  const secondLogin = learningLoop.startWeChatLogin("openid-guardian");
+
+  assert.equal(secondLogin.account.id, firstLogin.account.id);
+  assert.equal(secondLogin.account.guardianshipConfirmed, true);
+  assert.notEqual(secondLogin.session.token, firstLogin.session.token);
+});
+
+test("deleting a guardian releases its WeChat identity", () => {
+  const learningLoop = new LearningLoop();
+  const firstLogin = learningLoop.startWeChatLogin("openid-deleted-guardian");
+
+  learningLoop.deleteParentAccount(firstLogin.account.id);
+  const secondLogin = learningLoop.startWeChatLogin("openid-deleted-guardian");
+
+  assert.notEqual(secondLogin.account.id, firstLogin.account.id);
+});
+
 test("an expired or unknown session asks the guardian to log in again", () => {
   let now = 1_000_000;
   const learningLoop = new LearningLoop(undefined, { now: () => now });

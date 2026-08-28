@@ -15,6 +15,7 @@ data/*.db-*
 
 # WeChat Developer Tools local/private settings
 miniprogram/project.private.config.json
+miniprogram/config.private.js
 
 # OS/editor files
 .DS_Store

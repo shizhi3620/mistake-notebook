@@ -5,11 +5,14 @@ loadDotEnv();
 
 import { createOpenAiCompatibleExplanationProvider } from "../adapters/openai-compatible-explanation.ts";
 import { createOpenAiCompatibleRecognitionClient } from "../adapters/openai-compatible-recognition.ts";
+import { createWeChatIdentityResolver } from "../adapters/wechat-login.ts";
 import { LearningLoop } from "../learning-loop.ts";
 import { SqliteLearningLoopStore } from "../sqlite-learning-loop-store.ts";
 import { createLearningLoopServer } from "./http-server.ts";
 
 const deepSeekApiKey = process.env.DEEPSEEK_API_KEY;
+const weChatAppId = requiredEnvironment("WECHAT_APP_ID");
+const weChatAppSecret = requiredEnvironment("WECHAT_APP_SECRET");
 const port = Number(process.env.PORT ?? 3000);
 const databasePath =
   process.env.DATABASE_PATH ?? new URL("../../data/learning.db", import.meta.url).pathname;
@@ -37,7 +40,14 @@ const learningLoop = new LearningLoop(
   { explanationProvider },
 );
 
-const server = createLearningLoopServer({ learningLoop, recognitionClient });
+const server = createLearningLoopServer({
+  learningLoop,
+  recognitionClient,
+  weChatIdentityResolver: createWeChatIdentityResolver({
+    appId: weChatAppId,
+    appSecret: weChatAppSecret,
+  }),
+});
 
 server.listen(port, () => {
   console.log(
@@ -70,4 +80,12 @@ function loadDotEnv(): void {
     }
     if (process.env[key] === undefined) process.env[key] = value;
   }
+}
+
+function requiredEnvironment(key: string): string {
+  const value = process.env[key]?.trim();
+  if (!value) {
+    throw new Error(`${key} must be configured before starting the server.`);
+  }
+  return value;
 }

@@ -163,6 +163,10 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
         plan TEXT NOT NULL DEFAULT 'free',
         selected_child_profile_id TEXT
       );
+      CREATE TABLE IF NOT EXISTS wechat_identities (
+        wechat_subject TEXT PRIMARY KEY,
+        parent_account_id TEXT NOT NULL UNIQUE
+      );
       CREATE TABLE IF NOT EXISTS child_profiles (
         id TEXT PRIMARY KEY,
         parent_account_id TEXT NOT NULL,
@@ -801,6 +805,9 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
         .prepare("DELETE FROM sessions WHERE parent_account_id = ?")
         .run(parentAccountId);
       this.database
+        .prepare("DELETE FROM wechat_identities WHERE parent_account_id = ?")
+        .run(parentAccountId);
+      this.database
         .prepare("DELETE FROM reminder_settings WHERE parent_account_id = ?")
         .run(parentAccountId);
       this.database
@@ -1133,6 +1140,39 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
           plan: row.plan as ParentAccount["plan"],
         }
       : undefined;
+  }
+
+  findParentAccountByWeChatSubject(
+    weChatSubject: string,
+  ): ParentAccount | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT parent_accounts.id, guardianship_confirmed,
+                allow_direct_answer_reveal, plan
+           FROM parent_accounts
+           JOIN wechat_identities
+             ON wechat_identities.parent_account_id = parent_accounts.id
+          WHERE wechat_identities.wechat_subject = ?`,
+      )
+      .get(weChatSubject) as ParentAccountRow | undefined;
+
+    return row
+      ? {
+          id: row.id,
+          guardianshipConfirmed: Boolean(row.guardianship_confirmed),
+          allowDirectAnswerReveal: Boolean(row.allow_direct_answer_reveal),
+          plan: row.plan as ParentAccount["plan"],
+        }
+      : undefined;
+  }
+
+  saveWeChatSubject(parentAccountId: string, weChatSubject: string): void {
+    this.database
+      .prepare(
+        `INSERT INTO wechat_identities (wechat_subject, parent_account_id)
+         VALUES (?, ?)`,
+      )
+      .run(weChatSubject, parentAccountId);
   }
 
   saveParentAccount(account: ParentAccount): void {

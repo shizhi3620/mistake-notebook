@@ -21,6 +21,9 @@ async function withServer(
   });
   const server = createLearningLoopServer({
     learningLoop,
+    weChatIdentityResolver: async (temporaryCode) => ({
+      subject: `wechat:${temporaryCode}`,
+    }),
     recognitionClient: async () => ({
       stem: "3 + 5 = ?",
       formulas: ["3+5"],
@@ -195,6 +198,26 @@ test("the HTTP API carries a family through the full learning loop", async () =>
 
     const entitlements = await api.call("GET", "/entitlements", { token });
     assert.equal(entitlements.body.plan, "free");
+  });
+});
+
+test("the HTTP API exchanges a WeChat code and restores the same guardian", async () => {
+  await withServer(async (api) => {
+    const firstLogin = await api.call("POST", "/session", {
+      body: { code: "fresh-code" },
+    });
+    const secondLogin = await api.call("POST", "/session", {
+      body: { code: "fresh-code" },
+    });
+
+    assert.equal(firstLogin.status, 200);
+    assert.equal(secondLogin.status, 200);
+    assert.equal(firstLogin.body.account.id, secondLogin.body.account.id);
+    assert.notEqual(
+      firstLogin.body.session.token,
+      secondLogin.body.session.token,
+    );
+    assert.equal(JSON.stringify(firstLogin.body).includes("fresh-code"), false);
   });
 });
 

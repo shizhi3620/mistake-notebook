@@ -13,6 +13,9 @@ import type {
 
 export type LearningLoopServerDependencies = {
   learningLoop: LearningLoop;
+  weChatIdentityResolver?: (
+    temporaryCode: string,
+  ) => Promise<{ subject: string }>;
   recognitionClient?: (input: {
     imageDataUrl: string;
   }) => Promise<QuestionRecognition>;
@@ -21,7 +24,7 @@ export type LearningLoopServerDependencies = {
 export function createLearningLoopServer(
   dependencies: LearningLoopServerDependencies,
 ): Server {
-  const { learningLoop, recognitionClient } = dependencies;
+  const { learningLoop, recognitionClient, weChatIdentityResolver } = dependencies;
 
   return createServer((request, response) => {
     void handle(request, response).catch((error: unknown) => {
@@ -49,10 +52,14 @@ export function createLearningLoopServer(
     const body = await readJsonBody(request);
 
     if (method === "POST" && route === "/session") {
+      if (!weChatIdentityResolver) {
+        throw new Error("WeChat login is not configured.");
+      }
+      const identity = await weChatIdentityResolver(String(body?.code ?? ""));
       send(
         response,
         200,
-        learningLoop.startWeChatLogin(String(body?.code ?? "")),
+        learningLoop.startWeChatLogin(identity.subject),
       );
       return;
     }

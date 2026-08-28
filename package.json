@@ -9,6 +9,7 @@
   "scripts": {
     "test": "tsx --test test/**/*.test.ts",
     "check": "tsc --noEmit",
+    "configure:miniprogram": "node scripts/configure-miniprogram.mjs",
     "start": "tsx src/server/start.ts"
   },
   "dependencies": {

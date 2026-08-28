@@ -1,0 +1,19 @@
+import { writeFileSync } from "node:fs";
+
+const environments = ["develop", "trial", "release"];
+const apiBaseByEnvironment = Object.fromEntries(
+  environments.map((environment) => {
+    const key = `MINIPROGRAM_${environment.toUpperCase()}_API_BASE`;
+    const value = process.env[key]?.trim();
+    if (!value?.startsWith("https://")) {
+      throw new Error(`${key} must be an HTTPS API base URL.`);
+    }
+    return [environment, value.replace(/\/$/, "")];
+  }),
+);
+
+writeFileSync(
+  new URL("../miniprogram/config.private.js", import.meta.url),
+  `module.exports = ${JSON.stringify({ apiBaseByEnvironment }, null, 2)};\n`,
+  "utf8",
+);

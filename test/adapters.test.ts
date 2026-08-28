@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { createOpenAiCompatibleExplanationProvider } from "../src/adapters/openai-compatible-explanation.ts";
 import { createOpenAiCompatibleRecognitionClient } from "../src/adapters/openai-compatible-recognition.ts";
+import { createWeChatIdentityResolver } from "../src/adapters/wechat-login.ts";
 
 type FetchCall = { url: string; init: RequestInit };
 
@@ -208,4 +209,48 @@ test("the recognition client sends the image and validates the structured result
     httpError({ imageDataUrl: "data:image/jpeg;base64,QUJD" }),
     /429/,
   );
+});
+
+test("the WeChat identity resolver exchanges a temporary code without exposing session data", async () => {
+  const calls: string[] = [];
+  const resolveIdentity = createWeChatIdentityResolver({
+    appId: "test-app-id",
+    appSecret: "test-app-secret",
+    fetchImpl: (async (url: URL) => {
+      calls.push(String(url));
+      return new Response(JSON.stringify({ openid: "openid-for-guardian", session_key: "secret" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch,
+  });
+
+  const identity = await resolveIdentity("temporary-login-code");
+
+  assert.deepEqual(identity, { subject: "openid-for-guardian" });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0]!, /^https:\/\/api\.weixin\.qq\.com\/sns\/jscode2session\?/);
+  assert.match(calls[0]!, /appid=test-app-id/);
+  assert.match(calls[0]!, /js_code=temporary-login-code/);
+  assert.doesNotMatch(JSON.stringify(identity), /secret|temporary-login-code/);
+
+  const rejectInvalid = createWeChatIdentityResolver({
+    appId: "test-app-id",
+    appSecret: "test-app-secret",
+    fetchImpl: (async () =>
+      new Response(JSON.stringify({ errcode: 40029, errmsg: "invalid code" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch,
+  });
+  await assert.rejects(rejectInvalid("invalid-code"), /could not be verified/i);
+
+  const unavailable = createWeChatIdentityResolver({
+    appId: "test-app-id",
+    appSecret: "test-app-secret",
+    fetchImpl: (async () => {
+      throw new Error("connection reset");
+    }) as typeof fetch,
+  });
+  await assert.rejects(unavailable("retry-code"), /could not be verified/i);
 });

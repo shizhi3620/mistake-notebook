@@ -364,6 +364,10 @@ export type CorrectPracticeEvidence = {
 export interface LearningLoopStore {
   createParentAccount(account: ParentAccount): void;
   findParentAccount(parentAccountId: string): ParentAccount | undefined;
+  findParentAccountByWeChatSubject(
+    weChatSubject: string,
+  ): ParentAccount | undefined;
+  saveWeChatSubject(parentAccountId: string, weChatSubject: string): void;
   saveParentAccount(account: ParentAccount): void;
   createSession(session: LoginSession): void;
   findSession(token: string): LoginSession | undefined;
@@ -458,6 +462,7 @@ export interface LearningLoopStore {
 
 class InMemoryLearningLoopStore implements LearningLoopStore {
   private readonly accounts = new Map<string, ParentAccount>();
+  private readonly weChatSubjects = new Map<string, string>();
   private readonly sessions = new Map<string, LoginSession>();
   private readonly questionDrafts = new Map<string, QuestionDraft>();
   private readonly uploadCredentials = new Map<string, PhotoUploadCredential>();
@@ -476,6 +481,17 @@ class InMemoryLearningLoopStore implements LearningLoopStore {
 
   findParentAccount(parentAccountId: string): ParentAccount | undefined {
     return this.accounts.get(parentAccountId);
+  }
+
+  findParentAccountByWeChatSubject(
+    weChatSubject: string,
+  ): ParentAccount | undefined {
+    const parentAccountId = this.weChatSubjects.get(weChatSubject);
+    return parentAccountId ? this.accounts.get(parentAccountId) : undefined;
+  }
+
+  saveWeChatSubject(parentAccountId: string, weChatSubject: string): void {
+    this.weChatSubjects.set(weChatSubject, parentAccountId);
   }
 
   saveParentAccount(account: ParentAccount): void {
@@ -699,6 +715,12 @@ class InMemoryLearningLoopStore implements LearningLoopStore {
     for (const session of this.sessions.values()) {
       if (session.parentAccountId === parentAccountId) {
         this.sessions.delete(session.token);
+      }
+    }
+
+    for (const [weChatSubject, mappedParentAccountId] of this.weChatSubjects) {
+      if (mappedParentAccountId === parentAccountId) {
+        this.weChatSubjects.delete(weChatSubject);
       }
     }
 
@@ -1023,20 +1045,28 @@ export class LearningLoop {
     this.reminderSender = options.reminderSender;
   }
 
-  startWeChatLogin(_temporaryCode: string): WeChatLogin {
-    const account: ParentAccount = {
-      id: randomUUID(),
-      guardianshipConfirmed: false,
-      allowDirectAnswerReveal: false,
-      plan: "free",
-    };
+  startWeChatLogin(weChatSubject: string): WeChatLogin {
+    if (!weChatSubject.trim()) {
+      throw new Error("WeChat identity is required to start a session.");
+    }
+
+    let account = this.store.findParentAccountByWeChatSubject(weChatSubject);
+    if (!account) {
+      account = {
+        id: randomUUID(),
+        guardianshipConfirmed: false,
+        allowDirectAnswerReveal: false,
+        plan: "free",
+      };
+      this.store.createParentAccount(account);
+      this.store.saveWeChatSubject(account.id, weChatSubject);
+    }
     const session: LoginSession = {
       token: randomUUID(),
       parentAccountId: account.id,
       expiresAt: this.now() + this.sessionTtlMs,
     };
 
-    this.store.createParentAccount(account);
     this.store.createSession(session);
     return { account, session };
   }
