@@ -58,7 +58,9 @@ const server = createLearningLoopServer({
       console.warn(
         `[wechat_login_verification_failed] status=${String(details.status ?? "network")} ` +
           `errcode=${String(details.errcode ?? "unknown")} ` +
-          `errmsg=${String(details.errmsg ?? "unknown")}`,
+          `errmsg=${String(details.errmsg ?? "unknown")} ` +
+          `errorName=${String(details.errorName ?? "unknown")} ` +
+          `errorMessage=${String(details.errorMessage ?? "unknown")}`,
       ),
   }),
 });
