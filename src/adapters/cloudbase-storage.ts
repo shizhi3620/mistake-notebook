@@ -26,10 +26,31 @@ export function createCloudBaseNodeStorageVerifier(options: {
     getTemporaryUrl: async (fileId) => {
       const moduleName = "@cloudbase/node-sdk";
       const cloudbaseModule = (await import(moduleName)) as {
-        default: { init(config: { env: string; region?: string }): CloudBaseApp };
+        default: {
+          init(config: {
+            env: string;
+            region?: string;
+            secretId?: string;
+            secretKey?: string;
+            sessionToken?: string;
+          }): CloudBaseApp;
+        };
       };
       const cloudbase = cloudbaseModule.default;
-      const app = cloudbase.init({ env: options.env, region: options.region });
+      const secretId = process.env.TENCENTCLOUD_SECRETID?.trim();
+      const secretKey = process.env.TENCENTCLOUD_SECRETKEY?.trim();
+      if (!secretId || !secretKey) {
+        throw new Error(
+          "CloudBase storage credentials are not configured. Set TENCENTCLOUD_SECRETID and TENCENTCLOUD_SECRETKEY.",
+        );
+      }
+      const app = cloudbase.init({
+        env: options.env,
+        region: options.region,
+        secretId,
+        secretKey,
+        sessionToken: process.env.TENCENTCLOUD_SESSIONTOKEN?.trim(),
+      });
       const result = await app.getTempFileURL({ fileList: [fileId] });
       const file = result.fileList[0];
       if (!file || file.code !== "SUCCESS") {
