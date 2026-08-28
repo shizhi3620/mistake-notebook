@@ -4,6 +4,8 @@ export type WeChatIdentity = {
 
 type WeChatSessionResponse = {
   openid?: unknown;
+  errcode?: unknown;
+  errmsg?: unknown;
 };
 
 const LOGIN_VERIFICATION_ERROR =
@@ -13,6 +15,11 @@ export function createWeChatIdentityResolver(options: {
   appId: string;
   appSecret: string;
   fetchImpl?: typeof fetch;
+  onVerificationFailure?: (details: {
+    status?: number;
+    errcode?: unknown;
+    errmsg?: unknown;
+  }) => void;
 }): (temporaryCode: string) => Promise<WeChatIdentity> {
   const fetchImpl = options.fetchImpl ?? fetch;
 
@@ -31,14 +38,24 @@ export function createWeChatIdentityResolver(options: {
     try {
       response = await fetchImpl(url);
     } catch {
+      options.onVerificationFailure?.({});
       throw new Error(LOGIN_VERIFICATION_ERROR);
     }
-    if (!response.ok) {
-      throw new Error(LOGIN_VERIFICATION_ERROR);
-    }
-
     const payload = (await response.json()) as WeChatSessionResponse;
+    if (!response.ok) {
+      options.onVerificationFailure?.({
+        status: response.status,
+        errcode: payload.errcode,
+        errmsg: payload.errmsg,
+      });
+      throw new Error(LOGIN_VERIFICATION_ERROR);
+    }
     if (typeof payload.openid !== "string" || !payload.openid) {
+      options.onVerificationFailure?.({
+        status: response.status,
+        errcode: payload.errcode,
+        errmsg: payload.errmsg,
+      });
       throw new Error(LOGIN_VERIFICATION_ERROR);
     }
 

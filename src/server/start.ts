@@ -54,6 +54,8 @@ const server = createLearningLoopServer({
   weChatIdentityResolver: createWeChatIdentityResolver({
     appId: weChatAppId,
     appSecret: weChatAppSecret,
+    onVerificationFailure: (details) =>
+      console.warn(JSON.stringify({ event: "wechat_login_verification_failed", ...details })),
   }),
 });
 
