@@ -65,11 +65,22 @@ Page({
           rotationDegrees: this.data.rotationDegrees,
         });
       }
-      const imageDataUrl = await this.readAsDataUrl(this.data.imagePath);
+      const credential = await api.request(
+        "POST",
+        `/drafts/${draft.id}/photo-credential`,
+      );
+      const upload = await new Promise((resolve, reject) => {
+        wx.cloud.uploadFile({
+          cloudPath: credential.imageKey,
+          filePath: this.data.imagePath,
+          success: resolve,
+          fail: reject,
+        });
+      });
       const recognized = await api.request(
         "POST",
         `/drafts/${draft.id}/photo`,
-        { imageDataUrl },
+        { uploadToken: credential.uploadToken, fileId: upload.fileID },
       );
       wx.setStorageSync("currentDraft", recognized);
       wx.navigateTo({ url: `/pages/confirm/confirm?draftId=${draft.id}` });
@@ -90,16 +101,4 @@ Page({
     }
   },
 
-  readAsDataUrl(path) {
-    return new Promise((resolve, reject) => {
-      wx.getFileSystemManager().readFile({
-        filePath: path,
-        success: (res) => {
-          const base64 = wx.arrayBufferToBase64(res.data);
-          resolve(`data:image/jpeg;base64,${base64}`);
-        },
-        fail: () => reject(new Error("读取图片失败")),
-      });
-    });
-  },
 });

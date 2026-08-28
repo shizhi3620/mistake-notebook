@@ -16,6 +16,12 @@ import type {
 
 export type LearningLoopServerDependencies = {
   learningLoop: LearningLoop;
+  photoStorage?: {
+    verifyUploadedFile(input: {
+      fileId: string;
+      expectedImageKey: string;
+    }): Promise<{ imageUrl: string }>;
+  };
   log?: (event: HttpRequestLogEvent) => void;
   weChatIdentityResolver?: (
     temporaryCode: string,
@@ -37,7 +43,7 @@ export type HttpRequestLogEvent = {
 export function createLearningLoopServer(
   dependencies: LearningLoopServerDependencies,
 ): Server {
-  const { learningLoop, recognitionClient, weChatIdentityResolver } = dependencies;
+  const { learningLoop, recognitionClient, weChatIdentityResolver, photoStorage } = dependencies;
   const log = dependencies.log ?? (() => {});
 
   return createServer((request, response) => {
@@ -256,6 +262,32 @@ export function createLearningLoopServer(
     }
     const draftPhotoMatch = match(route, "/drafts/:id/photo");
     if (method === "POST" && draftPhotoMatch) {
+      if (body?.fileId && body?.uploadToken) {
+        if (!photoStorage) throw new Error("Photo storage is not configured.");
+        const credential = learningLoop.completePhotoUpload(
+          auth,
+          String(body.uploadToken),
+        );
+        if (!credential.imageKey) {
+          throw new Error("Uploaded photo is not attached to this draft.");
+        }
+        const uploaded = await photoStorage.verifyUploadedFile({
+          fileId: String(body.fileId),
+          expectedImageKey: credential.imageKey,
+        });
+        if (!recognitionClient) {
+          throw new Error("题目识别服务未配置。请返回手动录入。");
+        }
+        return send(
+          response,
+          200,
+          learningLoop.recordQuestionRecognition(
+            auth,
+            draftPhotoMatch.id,
+            await recognitionClient({ imageDataUrl: uploaded.imageUrl }),
+          ),
+        );
+      }
       const credential = learningLoop.requestPhotoUpload(
         auth,
         draftPhotoMatch.id,
@@ -278,6 +310,14 @@ export function createLearningLoopServer(
             imageDataUrl: String(body?.imageDataUrl ?? ""),
           }),
         ),
+      );
+    }
+    const draftPhotoCredentialMatch = match(route, "/drafts/:id/photo-credential");
+    if (method === "POST" && draftPhotoCredentialMatch) {
+      return send(
+        response,
+        200,
+        learningLoop.requestPhotoUpload(auth, draftPhotoCredentialMatch.id),
       );
     }
     const draftConfirmMatch = match(route, "/drafts/:id/confirm");

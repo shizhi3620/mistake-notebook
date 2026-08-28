@@ -252,6 +252,62 @@ test("operations endpoints expose health and redact request logs", async () => {
   }
 });
 
+test("the HTTP API accepts a CloudBase file ID only after an upload credential", async () => {
+  const learningLoop = new LearningLoop();
+  const server = createLearningLoopServer({
+    learningLoop,
+    photoStorage: {
+      verifyUploadedFile: async ({ fileId, expectedImageKey }) => {
+        assert.equal(fileId, "cloud://prod/photo");
+        assert.match(expectedImageKey, /^questions\//);
+        return { imageUrl: "https://storage.example/photo.jpg" };
+      },
+    },
+    recognitionClient: async ({ imageDataUrl }) => {
+      assert.equal(imageDataUrl, "https://storage.example/photo.jpg");
+      return { stem: "1 + 1 = ?", formulas: [], confidence: 0.9, region: null };
+    },
+    weChatIdentityResolver: async () => ({ subject: "cloudbase-test" }),
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+
+  try {
+    const call = async (path: string, body: unknown, token?: string) => {
+      const response = await fetch(`http://127.0.0.1:${port}/api${path}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+    const login = await call("/session", { code: "ignored" });
+    const token = login.body.session.token as string;
+    await call("/guardianship/confirm", {}, token);
+    const childResponse = await fetch(`http://127.0.0.1:${port}/api/children`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ nickname: "小明", grade: 3, region: "上海" }),
+    });
+    const child = await childResponse.json();
+    const draft = await call("/drafts", { childProfileId: child.id, source: "camera" }, token);
+    const credential = await call(`/drafts/${draft.body.id}/photo-credential`, {}, token);
+    const recognized = await call(`/drafts/${draft.body.id}/photo`, {
+      uploadToken: credential.body.uploadToken,
+      fileId: "cloud://prod/photo",
+    }, token);
+
+    assert.equal(recognized.status, 200);
+    assert.equal(recognized.body.recognition.stem, "1 + 1 = ?");
+  } finally {
+    server.close();
+  }
+});
+
 test("creating a child with an incomplete payload returns a readable validation error", async () => {
   await withServer(async (api) => {
     const login = await api.call("POST", "/session", { body: { code: "validation-login" } });
