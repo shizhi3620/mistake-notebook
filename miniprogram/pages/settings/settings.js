@@ -4,6 +4,7 @@ const provinceOptions = require("../../services/provinces");
 Page({
   data: {
     loading: true,
+    needsGuardianship: false,
     children: [],
     selectedChildId: "",
     entitlements: null,
@@ -34,6 +35,10 @@ Page({
     const app = getApp();
     try {
       const account = await app.ensureAccount();
+      if (!account.guardianshipConfirmed) {
+        this.setData({ loading: false, needsGuardianship: true });
+        return;
+      }
       const children = await api.request("GET", "/children");
       const entitlements = await api.request("GET", "/entitlements");
       const overview = await api.request("GET", "/home");
@@ -52,6 +57,17 @@ Page({
       });
     } catch (error) {
       this.setData({ loading: false });
+      wx.showToast({ title: error.message, icon: "none" });
+    }
+  },
+
+  async confirmGuardianship() {
+    try {
+      const account = await api.request("POST", "/guardianship/confirm");
+      getApp().globalData.account = account;
+      this.setData({ needsGuardianship: false });
+      this.load();
+    } catch (error) {
       wx.showToast({ title: error.message, icon: "none" });
     }
   },

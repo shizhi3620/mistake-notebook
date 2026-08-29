@@ -1,6 +1,14 @@
 <view class="page">
   <view wx:if="{{loading}}" class="muted">加载中…</view>
 
+  <block wx:elif="{{needsGuardianship}}">
+    <view class="card">
+      <view class="card-title">监护人确认</view>
+      <view class="muted" style="margin-bottom: 16rpx">使用孩子档案功能前，请确认你是孩子的家长或法定监护人。</view>
+      <button class="btn btn-primary" bindtap="confirmGuardianship">同意并继续</button>
+    </view>
+  </block>
+
   <block wx:else>
     <view class="card">
       <view class="row" style="margin-bottom: 12rpx">
