@@ -1,4 +1,5 @@
 const api = require("../../services/api");
+const provinceOptions = require("../../services/provinces");
 
 const app = getApp();
 
@@ -18,9 +19,9 @@ Page({
       grade: 3,
       location: null,
       region: "",
-      regionLabel: "请选择省份（选填）",
-      textbookVersion: "",
     },
+    provinces: ["请选择省份（选填）"].concat(provinceOptions.map((item) => item.name)),
+    provinceIndex: 0,
     grades: [1, 2, 3, 4, 5, 6, 7, 8, 9],
     gradeIndex: 2,
     saving: false,
@@ -80,16 +81,13 @@ Page({
     });
   },
 
-  onLocationChange(event) {
-    const names = event.detail.value || [];
-    const codes = event.detail.code || [];
-    const regionLabel = names.slice(0, 1).join("");
+  onProvinceChange(event) {
+    const index = Number(event.detail.value);
+    const province = provinceOptions[index - 1];
     this.setData({
-      "form.location": codes.length >= 1 && names.length >= 1 ? {
-        provinceCode: codes[0], provinceName: names[0],
-      } : null,
-      "form.regionLabel": regionLabel,
-      "form.region": regionLabel,
+      provinceIndex: index,
+      "form.location": province ? { provinceCode: province.code, provinceName: province.name } : null,
+      "form.region": province ? province.name : "",
     });
   },
 
@@ -97,7 +95,6 @@ Page({
     const form = this.data.form || {};
     const nickname = String(form.nickname || "").trim();
     const region = String(form.region || "").trim();
-    const textbookVersion = String(form.textbookVersion || "").trim();
     const grade = Number(form.grade || 0);
     const location = form.location || null;
     if (!nickname) {
@@ -110,7 +107,6 @@ Page({
         nickname,
         grade,
         ...(location ? { location } : region ? { region } : {}),
-        textbookVersion: textbookVersion || undefined,
       });
       wx.showToast({ title: "档案已创建", icon: "success" });
       this.load();

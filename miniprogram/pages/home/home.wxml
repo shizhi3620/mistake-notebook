@@ -29,13 +29,9 @@
       </view>
       <view class="field">
         <view class="label">省份（选填）</view>
-        <picker mode="region" fields="province" bindchange="onLocationChange">
-          <view class="input">{{form.regionLabel}}</view>
+        <picker range="{{provinces}}" value="{{provinceIndex}}" bindchange="onProvinceChange">
+          <view class="input">{{provinces[provinceIndex]}}</view>
         </picker>
-      </view>
-      <view class="field">
-        <view class="label">教材版本（选填）</view>
-        <input class="input" data-field="textbookVersion" placeholder="如：人教版" bindinput="onInput" />
       </view>
       <button class="btn btn-primary" disabled="{{saving}}" bindtap="createChild">创建档案</button>
     </view>

@@ -12,12 +12,13 @@
       <view wx:for="{{children}}" wx:key="id" class="row" style="padding: 12rpx 0; border-top: 1rpx solid #f0f1f3">
         <view>
           <view>{{item.nickname}} · {{item.grade}} 年级</view>
-          <view class="muted">{{item.provinceLabel}}{{item.textbookVersion ? ' · ' + item.textbookVersion : ''}}</view>
+          <view class="muted">{{item.provinceLabel}}</view>
         </view>
         <view class="row">
           <button wx:if="{{item.id !== selectedChildId}}" class="btn btn-plain"
                   style="margin-top: 0; margin-right: 12rpx" data-id="{{item.id}}" bindtap="selectChild">切换</button>
           <text wx:else class="tag tag-green">当前</text>
+          <button class="btn btn-plain" style="margin-top: 0; margin-right: 12rpx" data-id="{{item.id}}" bindtap="editChild">编辑</button>
           <button class="btn btn-danger" style="margin-top: 0" data-id="{{item.id}}" bindtap="removeChild">删除</button>
         </view>
       </view>
@@ -32,14 +33,11 @@
           </picker>
         </view>
         <view class="field">
-        <picker mode="region" fields="province" bindchange="onLocationChange">
-            <view class="input">{{form.regionLabel}}</view>
+          <picker range="{{provinces}}" value="{{provinceIndex}}" bindchange="onProvinceChange">
+            <view class="input">{{provinces[provinceIndex]}}</view>
           </picker>
         </view>
-        <view class="field">
-          <input class="input" data-field="textbookVersion" placeholder="教材版本（选填）" bindinput="onInput" />
-        </view>
-        <button class="btn btn-primary" bindtap="createChild">保存档案</button>
+        <button class="btn btn-primary" bindtap="saveChild">保存档案</button>
       </block>
     </view>
 

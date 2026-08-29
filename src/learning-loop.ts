@@ -2427,7 +2427,16 @@ export class LearningLoop {
     );
     this.validateChildProfile(profile);
     const updatedChildProfile = {
+      ...childProfile,
       ...profile,
+      ...(profile.location
+        ? {
+            location: {
+              ...childProfile.location,
+              ...profile.location,
+            },
+          }
+        : {}),
       ...(profile.region !== undefined
         ? { region: profile.region }
         : profile.location

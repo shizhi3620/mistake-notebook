@@ -1,4 +1,5 @@
 const api = require("../../services/api");
+const provinceOptions = require("../../services/provinces");
 
 Page({
   data: {
@@ -12,14 +13,15 @@ Page({
     hours: Array.from({ length: 24 }, (_, index) => `${index}:00`),
     hourIndex: 20,
     showChildForm: false,
+    editingChildId: "",
     form: {
       nickname: "",
       grade: 3,
       location: null,
       region: "",
-      regionLabel: "请选择省份（选填）",
-      textbookVersion: "",
     },
+    provinces: ["请选择省份（选填）"].concat(provinceOptions.map((item) => item.name)),
+    provinceIndex: 0,
     grades: [1, 2, 3, 4, 5, 6, 7, 8, 9],
     gradeIndex: 2,
   },
@@ -86,7 +88,35 @@ Page({
   },
 
   toggleChildForm() {
-    this.setData({ showChildForm: !this.data.showChildForm });
+    this.setData({
+      showChildForm: !this.data.showChildForm,
+      editingChildId: "",
+      form: { nickname: "", grade: 3, location: null, region: "" },
+      gradeIndex: 2,
+      provinceIndex: 0,
+    });
+  },
+
+  editChild(event) {
+    const child = this.data.children.find((item) => item.id === event.currentTarget.dataset.id);
+    if (!child) return;
+    const grade = Number(child.grade || 3);
+    const provinceCode = child.location && child.location.provinceCode;
+    const provinceIndex = Math.max(0, provinceOptions.findIndex((item) => item.code === provinceCode) + 1);
+    this.setData({
+      showChildForm: true,
+      editingChildId: child.id,
+      form: {
+        nickname: child.nickname,
+        grade,
+        location: child.location && child.location.provinceCode && child.location.provinceName
+          ? { provinceCode: child.location.provinceCode, provinceName: child.location.provinceName }
+          : null,
+        region: provinceIndex ? provinceOptions[provinceIndex - 1].name : "",
+      },
+      gradeIndex: Math.max(0, this.data.grades.indexOf(grade)),
+      provinceIndex,
+    });
   },
 
   onInput(event) {
@@ -101,23 +131,20 @@ Page({
     });
   },
 
-  onLocationChange(event) {
-    const names = event.detail.value || [];
-    const codes = event.detail.code || [];
+  onProvinceChange(event) {
+    const index = Number(event.detail.value);
+    const province = provinceOptions[index - 1];
     this.setData({
-      "form.location": codes.length >= 1 && names.length >= 1 ? {
-        provinceCode: codes[0], provinceName: names[0],
-      } : null,
-      "form.regionLabel": names.slice(0, 1).join(""),
-      "form.region": names.slice(0, 1).join(""),
+      provinceIndex: index,
+      "form.location": province ? { provinceCode: province.code, provinceName: province.name } : null,
+      "form.region": province ? province.name : "",
     });
   },
 
-  async createChild() {
+  async saveChild() {
     const form = this.data.form || {};
     const nickname = String(form.nickname || "").trim();
     const region = String(form.region || "").trim();
-    const textbookVersion = String(form.textbookVersion || "").trim();
     const grade = Number(form.grade || 0);
     const location = form.location || null;
     if (!nickname) {
@@ -125,13 +152,17 @@ Page({
       return;
     }
     try {
-      await api.request("POST", "/children", {
+      const payload = {
         nickname,
         grade,
         ...(location ? { location } : region ? { region } : {}),
-        textbookVersion: textbookVersion || undefined,
-      });
-      this.setData({ showChildForm: false });
+      };
+      if (this.data.editingChildId) {
+        await api.request("PATCH", `/children/${this.data.editingChildId}`, payload);
+      } else {
+        await api.request("POST", "/children", payload);
+      }
+      this.setData({ showChildForm: false, editingChildId: "" });
       this.load();
     } catch (error) {
       wx.showToast({ title: error && error.message ? error.message : "创建失败，请稍后重试", icon: "none" });
