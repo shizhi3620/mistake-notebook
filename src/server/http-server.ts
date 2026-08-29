@@ -263,7 +263,6 @@ export function createLearningLoopServer(
     const draftPhotoMatch = match(route, "/drafts/:id/photo");
     if (method === "POST" && draftPhotoMatch) {
       if (body?.fileId && body?.uploadToken) {
-        if (!photoStorage) throw new Error("Photo storage is not configured.");
         const credential = learningLoop.completePhotoUpload(
           auth,
           String(body.uploadToken),
@@ -271,10 +270,19 @@ export function createLearningLoopServer(
         if (!credential.imageKey) {
           throw new Error("Uploaded photo is not attached to this draft.");
         }
-        const uploaded = await photoStorage.verifyUploadedFile({
-          fileId: String(body.fileId),
-          expectedImageKey: credential.imageKey,
-        });
+        const suppliedImageUrl = String(body.imageUrl ?? "");
+        const uploaded = suppliedImageUrl.startsWith("https://")
+          ? { imageUrl: suppliedImageUrl }
+          : photoStorage
+            ? await photoStorage.verifyUploadedFile({
+                fileId: String(body.fileId),
+                expectedImageKey: credential.imageKey,
+              })
+            : (() => {
+                throw new Error(
+                  "Photo storage URL is not available. Configure client-side CloudBase temporary URL or server storage credentials.",
+                );
+              })();
         if (!recognitionClient) {
           throw new Error("题目识别服务未配置。请返回手动录入。");
         }
