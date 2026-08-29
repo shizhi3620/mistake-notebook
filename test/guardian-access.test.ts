@@ -174,7 +174,7 @@ test("a guardian can edit and switch only their own child profiles", () => {
   );
 });
 
-test("child profiles require a nickname, a grade from one to nine, and a province/city", () => {
+test("child profiles require a nickname and valid grade, with optional province", () => {
   const learningLoop = new LearningLoop();
   const guardian = learningLoop.startWeChatLogin("guardian-code").account;
 
@@ -198,19 +198,19 @@ test("child profiles require a nickname, a grade from one to nine, and a provinc
       }),
     /grade/i,
   );
+  const withoutProvince = learningLoop.createChildProfile(guardian.id, {
+    nickname: "小明",
+    grade: 3,
+  });
+  assert.equal(withoutProvince.region, undefined);
   assert.throws(
     () =>
       learningLoop.createChildProfile(guardian.id, {
-        nickname: "小明",
+        nickname: "小红",
         grade: 3,
-        location: {
-          provinceCode: "330000",
-          provinceName: "浙江省",
-          cityCode: "",
-          cityName: "",
-        },
+        location: { provinceCode: "bad", provinceName: "浙江省" },
       }),
-    /province and city/i,
+    /province is invalid/i,
   );
 });
 

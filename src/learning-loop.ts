@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 export type ProvinceCity = {
   provinceCode: string;
   provinceName: string;
-  cityCode: string;
-  cityName: string;
+  cityCode?: string;
+  cityName?: string;
 };
 
 export type ChildProfileInput = {
@@ -2392,7 +2392,11 @@ export class LearningLoop {
 
     const childProfile = {
       ...profile,
-      region: profile.region ?? this.displayRegion(profile.location!),
+      ...(profile.region !== undefined
+        ? { region: profile.region }
+        : profile.location
+          ? { region: this.displayRegion(profile.location) }
+          : {}),
       id: randomUUID(),
       parentAccountId,
     };
@@ -2424,7 +2428,11 @@ export class LearningLoop {
     this.validateChildProfile(profile);
     const updatedChildProfile = {
       ...profile,
-      region: profile.region ?? this.displayRegion(profile.location!),
+      ...(profile.region !== undefined
+        ? { region: profile.region }
+        : profile.location
+          ? { region: this.displayRegion(profile.location) }
+          : {}),
       id: childProfile.id,
       parentAccountId: childProfile.parentAccountId,
     };
@@ -2545,20 +2553,21 @@ export class LearningLoop {
       if (
         !/^\d{6}$/.test(provinceCode) ||
         !provinceName.trim() ||
-        !/^\d{6}$/.test(cityCode) ||
-        !cityName.trim()
+        ((cityCode || cityName) &&
+          (!/^\d{6}$/.test(cityCode ?? "") || !cityName?.trim()))
       ) {
-        throw new Error("A child profile province and city are required.");
+        throw new Error("A child profile province is invalid.");
       }
       return;
     }
 
-    if (!profile?.region || typeof profile.region !== "string" || !profile.region.trim()) {
-      throw new Error("A child profile province and city are required.");
+    if (profile?.region !== undefined &&
+      (typeof profile.region !== "string" || !profile.region.trim())) {
+      throw new Error("A child profile region is invalid.");
     }
   }
 
   private displayRegion(location: ProvinceCity): string {
-    return `${location.provinceName} ${location.cityName}`;
+    return [location.provinceName, location.cityName].filter(Boolean).join(" ");
   }
 }

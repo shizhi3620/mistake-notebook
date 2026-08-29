@@ -28,8 +28,8 @@
         </picker>
       </view>
       <view class="field">
-        <view class="label">地区</view>
-        <picker mode="region" fields="city" bindchange="onLocationChange">
+        <view class="label">省份（选填）</view>
+        <picker mode="region" fields="province" bindchange="onLocationChange">
           <view class="input">{{form.regionLabel}}</view>
         </picker>
       </view>

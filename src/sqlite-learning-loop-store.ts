@@ -1251,7 +1251,7 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
         profile.parentAccountId,
         profile.nickname,
         profile.grade,
-        profile.region ?? `${profile.location!.provinceName} ${profile.location!.cityName}`,
+        profile.region ?? profile.location?.provinceName ?? "",
         profile.location?.provinceCode ?? null,
         profile.location?.provinceName ?? null,
         profile.location?.cityCode ?? null,
@@ -1300,7 +1300,7 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
       .run(
         profile.nickname,
         profile.grade,
-        profile.region ?? `${profile.location!.provinceName} ${profile.location!.cityName}`,
+        profile.region ?? profile.location?.provinceName ?? "",
         profile.location?.provinceCode ?? null,
         profile.location?.provinceName ?? null,
         profile.location?.cityCode ?? null,
@@ -1355,13 +1355,14 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
       nickname: row.nickname,
       grade: row.grade,
       region: row.region,
-      ...(row.province_code && row.province_name && row.city_code && row.city_name
+      ...(row.province_code && row.province_name
         ? {
             location: {
               provinceCode: row.province_code,
               provinceName: row.province_name,
-              cityCode: row.city_code,
-              cityName: row.city_name,
+              ...(row.city_code && row.city_name
+                ? { cityCode: row.city_code, cityName: row.city_name }
+                : {}),
             },
           }
         : {}),

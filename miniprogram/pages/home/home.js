@@ -18,7 +18,7 @@ Page({
       grade: 3,
       location: null,
       region: "",
-      regionLabel: "请选择省、市",
+      regionLabel: "请选择省份（选填）",
       textbookVersion: "",
     },
     grades: [1, 2, 3, 4, 5, 6, 7, 8, 9],
@@ -83,14 +83,13 @@ Page({
   onLocationChange(event) {
     const names = event.detail.value || [];
     const codes = event.detail.code || [];
-    const regionLabel = names.slice(0, 2).join(" · ");
+    const regionLabel = names.slice(0, 1).join("");
     this.setData({
-      "form.location": codes.length >= 2 && names.length >= 2 ? {
+      "form.location": codes.length >= 1 && names.length >= 1 ? {
         provinceCode: codes[0], provinceName: names[0],
-        cityCode: codes[1], cityName: names[1],
       } : null,
       "form.regionLabel": regionLabel,
-      "form.region": regionLabel.replace(/ · /g, " "),
+      "form.region": regionLabel,
     });
   },
 
@@ -101,8 +100,8 @@ Page({
     const textbookVersion = String(form.textbookVersion || "").trim();
     const grade = Number(form.grade || 0);
     const location = form.location || null;
-    if (!nickname || (!location && !region)) {
-      wx.showToast({ title: "请选择昵称、省和市", icon: "none" });
+    if (!nickname) {
+      wx.showToast({ title: "请输入孩子昵称", icon: "none" });
       return;
     }
     this.setData({ saving: true });
@@ -110,7 +109,7 @@ Page({
       await api.request("POST", "/children", {
         nickname,
         grade,
-        ...(location ? { location } : { region }),
+        ...(location ? { location } : region ? { region } : {}),
         textbookVersion: textbookVersion || undefined,
       });
       wx.showToast({ title: "档案已创建", icon: "success" });

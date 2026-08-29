@@ -12,7 +12,7 @@
       <view wx:for="{{children}}" wx:key="id" class="row" style="padding: 12rpx 0; border-top: 1rpx solid #f0f1f3">
         <view>
           <view>{{item.nickname}} · {{item.grade}} 年级</view>
-          <view class="muted">{{item.region}}{{item.textbookVersion ? ' · ' + item.textbookVersion : ''}}</view>
+          <view class="muted">{{item.provinceLabel}}{{item.textbookVersion ? ' · ' + item.textbookVersion : ''}}</view>
         </view>
         <view class="row">
           <button wx:if="{{item.id !== selectedChildId}}" class="btn btn-plain"
@@ -32,7 +32,7 @@
           </picker>
         </view>
         <view class="field">
-        <picker mode="region" fields="city" bindchange="onLocationChange">
+        <picker mode="region" fields="province" bindchange="onLocationChange">
             <view class="input">{{form.regionLabel}}</view>
           </picker>
         </view>
