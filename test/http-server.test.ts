@@ -252,6 +252,28 @@ test("operations endpoints expose health and redact request logs", async () => {
   }
 });
 
+test("health reports storage unavailability when the database check fails", async () => {
+  const server = createLearningLoopServer({
+    learningLoop: new LearningLoop(),
+    healthCheck: async () => {
+      throw new Error("database connection failed");
+    },
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/healthz`);
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), {
+      status: "unavailable",
+      error: "storage_unavailable",
+    });
+  } finally {
+    server.close();
+  }
+});
+
 test("the HTTP API accepts a CloudBase file ID only after an upload credential", async () => {
   const learningLoop = new LearningLoop();
   const server = createLearningLoopServer({

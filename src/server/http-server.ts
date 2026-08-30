@@ -16,6 +16,7 @@ import type {
 
 export type LearningLoopServerDependencies = {
   learningLoop: LearningLoop;
+  healthCheck?: () => Promise<void>;
   photoStorage?: {
     verifyUploadedFile(input: {
       fileId: string;
@@ -43,7 +44,7 @@ export type HttpRequestLogEvent = {
 export function createLearningLoopServer(
   dependencies: LearningLoopServerDependencies,
 ): Server {
-  const { learningLoop, recognitionClient, weChatIdentityResolver, photoStorage } = dependencies;
+  const { learningLoop, recognitionClient, weChatIdentityResolver, photoStorage, healthCheck } = dependencies;
   const log = dependencies.log ?? (() => {});
 
   return createServer((request, response) => {
@@ -82,7 +83,12 @@ export function createLearningLoopServer(
     const method = request.method ?? "GET";
 
     if (method === "GET" && path === "/healthz") {
-      await send(response, 200, { status: "ok" });
+      try {
+        await healthCheck?.();
+        await send(response, 200, { status: "ok" });
+      } catch {
+        await send(response, 503, { status: "unavailable", error: "storage_unavailable" });
+      }
       return;
     }
 
