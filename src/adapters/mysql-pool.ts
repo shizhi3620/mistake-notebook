@@ -63,3 +63,7 @@ export async function verifyMysqlPool(pool: Pool): Promise<void> {
     connection.release();
   }
 }
+
+export async function closeMysqlPool(pool: Pool): Promise<void> {
+  await pool.end();
+}

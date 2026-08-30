@@ -9,6 +9,7 @@ import { createWeChatIdentityResolver } from "../adapters/wechat-login.ts";
 import { createCloudBaseNodeStorageVerifier } from "../adapters/cloudbase-storage.ts";
 import {
   createMysqlPool,
+  closeMysqlPool,
   readMysqlConnectionConfig,
   verifyMysqlPool,
 } from "../adapters/mysql-pool.ts";
@@ -22,6 +23,7 @@ const weChatAppId = requiredEnvironment("WECHAT_APP_ID");
 const weChatAppSecret = requiredEnvironment("WECHAT_APP_SECRET");
 const mysqlConfig = readMysqlConnectionConfig();
 let mysqlHealthCheck: (() => Promise<void>) | undefined;
+let mysqlPool: Awaited<ReturnType<typeof createMysqlPool>> | undefined;
 const port = Number(process.env.PORT ?? 3000);
 const databasePath =
   process.env.DATABASE_PATH ?? new URL("../../data/learning.db", import.meta.url).pathname;
@@ -33,15 +35,16 @@ if (process.env.CLOUD_HOSTING === "true" && !mysqlConfig) {
 }
 
 if (mysqlConfig) {
-  const mysqlPool = createMysqlPool(mysqlConfig);
+  const configuredMysqlPool = createMysqlPool(mysqlConfig);
+  mysqlPool = configuredMysqlPool;
   mysqlHealthCheck = async () => {
-    await verifyMysqlPool(mysqlPool);
+    await verifyMysqlPool(configuredMysqlPool);
   };
   try {
-    await verifyMysqlPool(mysqlPool);
-    await migrateMysqlSchema(mysqlPool);
+    await verifyMysqlPool(configuredMysqlPool);
+    await migrateMysqlSchema(configuredMysqlPool);
   } catch (error) {
-    await mysqlPool.end();
+    await closeMysqlPool(configuredMysqlPool);
     throw new Error(
       `MySQL connection or schema initialization failed: ${
         error instanceof Error ? error.message : "unknown error"
@@ -105,6 +108,18 @@ server.listen(port, () => {
       (deepSeekApiKey ? "" : " (DEEPSEEK_API_KEY not set: explanation and recognition disabled)"),
   );
 });
+
+let shuttingDown = false;
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (mysqlPool) await closeMysqlPool(mysqlPool);
+  console.log(`math-mistake-notebook stopped (${signal})`);
+}
+
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
+process.once("SIGINT", () => void shutdown("SIGINT"));
 
 function loadDotEnv(): void {
   let contents: string;
