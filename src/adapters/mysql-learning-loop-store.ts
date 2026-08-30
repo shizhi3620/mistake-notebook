@@ -4,7 +4,7 @@ import type {
   ConfirmedQuestion,
   CorrectPracticeEvidence,
   HomeworkReview,
-  LearningLoopStore,
+  AsyncLearningLoopStore,
   LoginSession,
   MistakeRecord,
   ParentAccount,
@@ -29,7 +29,7 @@ type ChildRow = RowDataPacket & {
 };
 
 /** Promise-based MySQL implementation. The domain can adopt this seam without exposing SQL. */
-export class MysqlLearningLoopStore {
+export class MysqlLearningLoopStore implements AsyncLearningLoopStore {
   constructor(private readonly pool: Pool) {}
 
   private async one<T extends RowDataPacket>(sql: string, params: unknown[]): Promise<T | undefined> {
