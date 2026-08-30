@@ -469,7 +469,7 @@ export type AsyncLearningLoopStore = {
 };
 
 export function asAsyncLearningLoopStore(
-  store: LearningLoopStore,
+  store: LearningLoopStore | AsyncLearningLoopStore,
 ): AsyncLearningLoopStore {
   return new Proxy({} as AsyncLearningLoopStore, {
     get(_target, property) {

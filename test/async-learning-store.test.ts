@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import {
   asAsyncLearningLoopStore,
+  type AsyncLearningLoopStore,
   type LearningLoopStore,
 } from "../src/learning-loop.ts";
 import { SqliteLearningLoopStore } from "../src/sqlite-learning-loop-store.ts";
@@ -45,4 +46,17 @@ test("the SQLite adapter satisfies the same async seam", async () => {
     store.close();
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("the seam accepts an already-async adapter without double-wrapping values", async () => {
+  const store = {
+    async findParentAccount(parentAccountId: string) {
+      return { id: parentAccountId };
+    },
+  } as unknown as AsyncLearningLoopStore;
+
+  const asyncStore = asAsyncLearningLoopStore(store);
+  assert.deepEqual(await asyncStore.findParentAccount("mysql-guardian"), {
+    id: "mysql-guardian",
+  });
 });
