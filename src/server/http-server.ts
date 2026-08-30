@@ -117,39 +117,39 @@ export function createLearningLoopServer(
     const auth = guardian.id;
 
     if (method === "POST" && route === "/guardianship/confirm") {
-      return send(response, 200, learningLoop.confirmGuardianship(auth));
+      return send(response, 200, await learningLoop.confirmGuardianship(auth));
     }
     if (method === "GET" && route === "/children") {
-      return send(response, 200, learningLoop.listChildProfiles(auth));
+      return send(response, 200, await learningLoop.listChildProfiles(auth));
     }
     if (method === "POST" && route === "/children") {
-      return send(response, 200, learningLoop.createChildProfile(auth, body));
+      return send(response, 200, await learningLoop.createChildProfile(auth, body));
     }
     if (method === "GET" && route === "/home") {
-      return send(response, 200, learningLoop.getHomeOverview(auth));
+      return send(response, 200, await learningLoop.getHomeOverview(auth));
     }
     if (method === "GET" && route === "/entitlements") {
-      return send(response, 200, learningLoop.getEntitlements(auth));
+      return send(response, 200, await learningLoop.getEntitlements(auth));
     }
     if (method === "PUT" && route === "/settings/answer-reveal") {
       return send(
         response,
         200,
-        learningLoop.setAnswerRevealPreference(auth, Boolean(body?.allow)),
+        await learningLoop.setAnswerRevealPreference(auth, Boolean(body?.allow)),
       );
     }
     if (method === "POST" && route === "/subscription") {
       return send(
         response,
         200,
-        learningLoop.grantSubscription(auth, body?.plan),
+        await learningLoop.grantSubscription(auth, body?.plan),
       );
     }
     if (method === "POST" && route === "/drafts") {
       return send(
         response,
         200,
-        learningLoop.startQuestionDraft(
+        await learningLoop.startQuestionDraft(
           auth,
           String(body?.childProfileId),
           body?.source,
@@ -160,7 +160,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        learningLoop.createHomeworkReview(
+        await learningLoop.createHomeworkReview(
           auth,
           String(body?.childProfileId),
           body?.recognition,
@@ -180,7 +180,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        learningLoop.getDueReviews(
+        await learningLoop.getDueReviews(
           auth,
           String(url.searchParams.get("childProfileId")),
         ),
@@ -208,7 +208,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        learningLoop.listMistakes(
+        await learningLoop.listMistakes(
           auth,
           String(url.searchParams.get("childProfileId")),
           filters,
@@ -219,7 +219,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        learningLoop.getWeeklyReport(
+        await learningLoop.getWeeklyReport(
           auth,
           String(url.searchParams.get("childProfileId")),
         ),
@@ -231,7 +231,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        learningLoop.updateChildProfile(auth, childMatch.id, body),
+        await learningLoop.updateChildProfile(auth, childMatch.id, body),
       );
     }
     const childSelectMatch = match(route, "/children/:id/select");
@@ -248,7 +248,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        learningLoop.updateReminderSettings(auth, childRemindersMatch.id, {
+        await learningLoop.updateReminderSettings(auth, childRemindersMatch.id, {
           enabled: Boolean(body?.enabled),
           hourOfDay: Number(body?.hourOfDay),
         }),
@@ -260,7 +260,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        learningLoop.updateQuestionDraft(auth, draftMatch.id, {
+        await learningLoop.updateQuestionDraft(auth, draftMatch.id, {
           crop: body?.crop,
           rotationDegrees: body?.rotationDegrees,
         }),
@@ -273,7 +273,7 @@ export function createLearningLoopServer(
     const draftPhotoMatch = match(route, "/drafts/:id/photo");
     if (method === "POST" && draftPhotoMatch) {
       if (body?.fileId && body?.uploadToken) {
-        const credential = learningLoop.completePhotoUpload(
+        const credential = await learningLoop.completePhotoUpload(
           auth,
           String(body.uploadToken),
         );
@@ -299,18 +299,18 @@ export function createLearningLoopServer(
         return send(
           response,
           200,
-          learningLoop.recordQuestionRecognition(
+          await learningLoop.recordQuestionRecognition(
             auth,
             draftPhotoMatch.id,
             await recognitionClient({ imageDataUrl: uploaded.imageUrl }),
           ),
         );
       }
-      const credential = learningLoop.requestPhotoUpload(
+      const credential = await learningLoop.requestPhotoUpload(
         auth,
         draftPhotoMatch.id,
       );
-      learningLoop.completePhotoUpload(auth, credential.uploadToken);
+      await learningLoop.completePhotoUpload(auth, credential.uploadToken);
 
       if (!recognitionClient) {
         throw new Error(
@@ -321,7 +321,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        learningLoop.recordQuestionRecognition(
+        await learningLoop.recordQuestionRecognition(
           auth,
           draftPhotoMatch.id,
           await recognitionClient({
@@ -335,7 +335,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        learningLoop.requestPhotoUpload(auth, draftPhotoCredentialMatch.id),
+        await learningLoop.requestPhotoUpload(auth, draftPhotoCredentialMatch.id),
       );
     }
     const draftConfirmMatch = match(route, "/drafts/:id/confirm");
@@ -343,7 +343,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        learningLoop.confirmQuestion(auth, draftConfirmMatch.id, {
+        await learningLoop.confirmQuestion(auth, draftConfirmMatch.id, {
           stem: String(body?.stem ?? ""),
           studentAnswer: body?.studentAnswer,
         }),
@@ -355,7 +355,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        learningLoop.getHomeworkReview(auth, homeworkReviewMatch.id),
+        await learningLoop.getHomeworkReview(auth, homeworkReviewMatch.id),
       );
     }
     const homeworkQuestionConfirmMatch = match(
@@ -366,7 +366,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        learningLoop.confirmHomeworkQuestion(
+        await learningLoop.confirmHomeworkQuestion(
           auth,
           homeworkQuestionConfirmMatch.reviewId,
           homeworkQuestionConfirmMatch.candidateId,
@@ -397,7 +397,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        learningLoop.recordStudentAnswer(auth, studentAnswerMatch.id, {
+        await learningLoop.recordStudentAnswer(auth, studentAnswerMatch.id, {
           answer: body?.answer,
           skipAnalysis: body?.skipAnalysis,
         }),
@@ -408,7 +408,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        learningLoop.saveMistake(auth, mistakeCreateMatch.id, {
+        await learningLoop.saveMistake(auth, mistakeCreateMatch.id, {
           primaryKnowledgePoint: String(body?.primaryKnowledgePoint ?? ""),
           secondaryKnowledgePoints: body?.secondaryKnowledgePoints,
           mistakeCause: body?.mistakeCause,
@@ -421,7 +421,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        learningLoop.updateMistakeCause(
+        await learningLoop.updateMistakeCause(
           auth,
           mistakeMatch.id,
           String(body?.mistakeCause ?? ""),
@@ -438,7 +438,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        learningLoop.completeReview(auth, reviewCompleteMatch.id, {
+        await learningLoop.completeReview(auth, reviewCompleteMatch.id, {
           selfAssessment: body?.selfAssessment,
           variantCorrect: body?.variantCorrect ?? null,
         }),
