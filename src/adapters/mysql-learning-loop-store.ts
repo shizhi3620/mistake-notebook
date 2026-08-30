@@ -1,9 +1,19 @@
 import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
 import type {
   ChildProfile,
+  ConfirmedQuestion,
+  CorrectPracticeEvidence,
+  HomeworkReview,
   LearningLoopStore,
   LoginSession,
+  MistakeRecord,
   ParentAccount,
+  PhotoUploadCredential,
+  QuestionDraft,
+  ReminderDispatch,
+  ReminderSettings,
+  Review,
+  ReviewSchedule,
 } from "../learning-loop.ts";
 
 type AccountRow = RowDataPacket & {
@@ -49,6 +59,20 @@ export class MysqlLearningLoopStore {
   async selectChildProfile(parentAccountId: string, childProfileId: string): Promise<void> { await this.pool.execute("UPDATE parent_accounts SET selected_child_profile_id=? WHERE id=? AND EXISTS (SELECT 1 FROM child_profiles WHERE id=? AND parent_account_id=?)", [childProfileId, parentAccountId, childProfileId, parentAccountId]); }
 
   async deleteParentAccount(parentAccountId: string): Promise<void> { const connection = await this.pool.getConnection(); try { await connection.beginTransaction(); await connection.execute("DELETE FROM parent_accounts WHERE id=?", [parentAccountId]); await connection.commit(); } catch (error) { await connection.rollback(); throw error; } finally { connection.release(); } }
+
+  async createQuestionDraft(draft: QuestionDraft): Promise<void> { await this.pool.execute("INSERT INTO question_drafts (id,parent_account_id,child_profile_id,source,image_key,crop_json,rotation_degrees,recognition_json) VALUES (?,?,?,?,?,?,?,?)", [draft.id,draft.parentAccountId,draft.childProfileId,draft.source,draft.imageKey,JSON.stringify(draft.crop),draft.rotationDegrees,JSON.stringify(draft.recognition)]); }
+  async findQuestionDraft(parentAccountId: string, id: string): Promise<QuestionDraft | undefined> { const row = await this.one<RowDataPacket & Record<string, unknown>>("SELECT * FROM question_drafts WHERE id=? AND parent_account_id=?", [id,parentAccountId]); return row && { id: String(row.id), parentAccountId: String(row.parent_account_id), childProfileId: String(row.child_profile_id), source: row.source as QuestionDraft["source"], imageKey: row.image_key as string | null, crop: row.crop_json as QuestionDraft["crop"], rotationDegrees: Number(row.rotation_degrees), recognition: row.recognition_json as QuestionDraft["recognition"] }; }
+  async saveQuestionDraft(draft: QuestionDraft): Promise<void> { await this.pool.execute("UPDATE question_drafts SET image_key=?,crop_json=?,rotation_degrees=?,recognition_json=? WHERE id=? AND parent_account_id=?", [draft.imageKey,JSON.stringify(draft.crop),draft.rotationDegrees,JSON.stringify(draft.recognition),draft.id,draft.parentAccountId]); }
+  async deleteQuestionDraft(parentAccountId: string, id: string): Promise<void> { await this.pool.execute("DELETE FROM question_drafts WHERE id=? AND parent_account_id=?", [id,parentAccountId]); }
+  async createUploadCredential(value: PhotoUploadCredential): Promise<void> { await this.pool.execute("INSERT INTO upload_credentials (upload_token,parent_account_id,draft_id,image_key,expires_at,used_at) VALUES (?,?,?,?,?,?)", [value.uploadToken,value.parentAccountId,value.draftId,value.imageKey,value.expiresAt,value.usedAt]); }
+  async findUploadCredential(token: string): Promise<PhotoUploadCredential | undefined> { const row = await this.one<RowDataPacket & Record<string, unknown>>("SELECT * FROM upload_credentials WHERE upload_token=?", [token]); return row && { uploadToken: String(row.upload_token), parentAccountId: String(row.parent_account_id), draftId: String(row.draft_id), imageKey: String(row.image_key), expiresAt: Number(row.expires_at), usedAt: row.used_at == null ? null : Number(row.used_at) }; }
+  async saveUploadCredential(value: PhotoUploadCredential): Promise<void> { await this.pool.execute("UPDATE upload_credentials SET used_at=? WHERE upload_token=? AND parent_account_id=?", [value.usedAt,value.uploadToken,value.parentAccountId]); }
+
+  async createQuestion(value: ConfirmedQuestion): Promise<void> { await this.pool.execute("INSERT INTO questions (id,parent_account_id,child_profile_id,source,stem,formulas_json,image_key,crop_json,rotation_degrees,region_json,student_answer,answer_analysis_skipped,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [value.id,value.parentAccountId,value.childProfileId,value.source,value.stem,JSON.stringify(value.formulas),value.imageKey,JSON.stringify(value.crop),value.rotationDegrees,JSON.stringify(value.region),value.studentAnswer,value.answerAnalysisSkipped,value.status,value.createdAt]); }
+  async findQuestion(parentAccountId: string, id: string): Promise<ConfirmedQuestion | undefined> { const row = await this.one<RowDataPacket & Record<string, unknown>>("SELECT * FROM questions WHERE id=? AND parent_account_id=?", [id,parentAccountId]); return row && this.question(row); }
+  async saveQuestion(value: ConfirmedQuestion): Promise<void> { await this.pool.execute("UPDATE questions SET stem=?,formulas_json=?,image_key=?,crop_json=?,rotation_degrees=?,region_json=?,student_answer=?,answer_analysis_skipped=?,status=? WHERE id=? AND parent_account_id=?", [value.stem,JSON.stringify(value.formulas),value.imageKey,JSON.stringify(value.crop),value.rotationDegrees,JSON.stringify(value.region),value.studentAnswer,value.answerAnalysisSkipped,value.status,value.id,value.parentAccountId]); }
+  async countQuestionsSince(parentAccountId: string, since: number): Promise<number> { const row = await this.one<RowDataPacket & { count: number }>("SELECT COUNT(*) count FROM questions WHERE parent_account_id=? AND created_at>=?", [parentAccountId,since]); return Number(row?.count ?? 0); }
+  private question(row: RowDataPacket & Record<string, unknown>): ConfirmedQuestion { return { id:String(row.id),parentAccountId:String(row.parent_account_id),childProfileId:String(row.child_profile_id),source:row.source as ConfirmedQuestion["source"],stem:String(row.stem),formulas:JSON.parse(String(row.formulas_json)),imageKey:row.image_key as string|null,crop:row.crop_json as ConfirmedQuestion["crop"],rotationDegrees:Number(row.rotation_degrees),region:row.region_json as ConfirmedQuestion["region"],studentAnswer:row.student_answer as string|null,answerAnalysisSkipped:Boolean(row.answer_analysis_skipped),status:row.status as ConfirmedQuestion["status"],createdAt:Number(row.created_at) }; }
 
   /** Atomically creates the account and its platform identity during first login. */
   async createParentAccountWithWeChatSubject(account: ParentAccount, subject: string): Promise<void> {
