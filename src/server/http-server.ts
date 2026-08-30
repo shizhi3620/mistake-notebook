@@ -78,7 +78,7 @@ export function createLearningLoopServer(
     const method = request.method ?? "GET";
 
     if (method === "GET" && path === "/healthz") {
-      send(response, 200, { status: "ok" });
+      await send(response, 200, { status: "ok" });
       return;
     }
 
@@ -98,12 +98,12 @@ export function createLearningLoopServer(
       send(
         response,
         200,
-        learningLoop.startWeChatLogin(identity.subject),
+        await learningLoop.startWeChatLogin(identity.subject),
       );
       return;
     }
 
-    const guardian = learningLoop.resumeSession(bearerToken(request));
+    const guardian = await learningLoop.resumeSession(bearerToken(request));
     const auth = guardian.id;
 
     if (method === "POST" && route === "/guardianship/confirm") {
@@ -226,11 +226,11 @@ export function createLearningLoopServer(
     }
     const childSelectMatch = match(route, "/children/:id/select");
     if (method === "POST" && childSelectMatch) {
-      learningLoop.selectChildProfile(auth, childSelectMatch.id);
+      await learningLoop.selectChildProfile(auth, childSelectMatch.id);
       return send(response, 200, { ok: true });
     }
     if (method === "DELETE" && childMatch) {
-      learningLoop.deleteChildProfile(auth, childMatch.id);
+      await learningLoop.deleteChildProfile(auth, childMatch.id);
       return send(response, 200, { ok: true });
     }
     const childRemindersMatch = match(route, "/children/:id/reminders");
@@ -257,7 +257,7 @@ export function createLearningLoopServer(
       );
     }
     if (method === "DELETE" && draftMatch) {
-      learningLoop.cancelQuestionDraft(auth, draftMatch.id);
+      await learningLoop.cancelQuestionDraft(auth, draftMatch.id);
       return send(response, 200, { ok: true });
     }
     const draftPhotoMatch = match(route, "/drafts/:id/photo");
@@ -419,7 +419,7 @@ export function createLearningLoopServer(
       );
     }
     if (method === "DELETE" && mistakeMatch) {
-      learningLoop.deleteMistake(auth, mistakeMatch.id);
+      await learningLoop.deleteMistake(auth, mistakeMatch.id);
       return send(response, 200, { ok: true });
     }
 
@@ -435,7 +435,7 @@ export function createLearningLoopServer(
       );
     }
 
-    send(response, 404, { error: "Not found." });
+    await send(response, 404, { error: "Not found." });
   }
 }
 
@@ -487,11 +487,12 @@ async function readJsonBody(request: IncomingMessage): Promise<any> {
   }
 }
 
-function send(
+async function send(
   response: ServerResponse,
   status: number,
-  payload: unknown,
-): void {
+  payload: unknown | Promise<unknown>,
+): Promise<void> {
+  const resolvedPayload = await payload;
   response.writeHead(status, { "content-type": "application/json" });
-  response.end(JSON.stringify(payload));
+  response.end(JSON.stringify(resolvedPayload));
 }
