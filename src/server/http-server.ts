@@ -64,8 +64,12 @@ export function createLearningLoopServer(
     void handle(request, response).catch((error: unknown) => {
       const message =
         error instanceof Error ? error.message : "Unexpected server error.";
+      if (isStorageFailure(error)) {
+        void send(response, 503, { error: "storage_unavailable" });
+        return;
+      }
       const status = /log in again/i.test(message) ? 401 : 400;
-      send(response, status, { error: message });
+      void send(response, status, { error: message });
     });
   });
 
@@ -495,4 +499,20 @@ async function send(
   const resolvedPayload = await payload;
   response.writeHead(status, { "content-type": "application/json" });
   response.end(JSON.stringify(resolvedPayload));
+}
+
+function isStorageFailure(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; name?: unknown; message?: unknown };
+  if (
+    typeof candidate.code === "string" &&
+    /^(ECONNREFUSED|ECONNRESET|ETIMEDOUT|PROTOCOL_CONNECTION_LOST|ER_LOCK_DEADLOCK|ER_LOCK_WAIT_TIMEOUT)$/.test(candidate.code)
+  ) {
+    return true;
+  }
+  return (
+    candidate.name === "StorageUnavailableError" ||
+    (typeof candidate.message === "string" &&
+      /(?:mysql|database|storage)\s+(?:connection|unavailable|query|timeout)/i.test(candidate.message))
+  );
 }
