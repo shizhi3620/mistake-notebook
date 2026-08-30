@@ -460,6 +460,29 @@ export interface LearningLoopStore {
   selectChildProfile(parentAccountId: string, childProfileId: string): void;
 }
 
+export type AsyncLearningLoopStore = {
+  [Method in keyof LearningLoopStore]: LearningLoopStore[Method] extends (
+    ...args: infer Args
+  ) => infer Result
+    ? (...args: Args) => Promise<Awaited<Result>>
+    : never;
+};
+
+export function asAsyncLearningLoopStore(
+  store: LearningLoopStore,
+): AsyncLearningLoopStore {
+  return new Proxy({} as AsyncLearningLoopStore, {
+    get(_target, property) {
+      const method = store[property as keyof LearningLoopStore];
+      if (typeof method !== "function") return undefined;
+      return (...args: unknown[]) =>
+        Promise.resolve(
+          (method as (...values: unknown[]) => unknown).apply(store, args),
+        );
+    },
+  });
+}
+
 class InMemoryLearningLoopStore implements LearningLoopStore {
   private readonly accounts = new Map<string, ParentAccount>();
   private readonly weChatSubjects = new Map<string, string>();
