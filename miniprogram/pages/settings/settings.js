@@ -251,17 +251,6 @@ Page({
     }
   },
 
-  async subscribe() {
-    // 开发调试入口：真实支付在后续独立规格中实现。
-    try {
-      await api.request("POST", "/subscription", { plan: "subscriber" });
-      wx.showToast({ title: "已升级为订阅（调试）", icon: "success" });
-      this.load();
-    } catch (error) {
-      wx.showToast({ title: error.message, icon: "none" });
-    }
-  },
-
   deleteAccount() {
     wx.showModal({
       title: "注销家长账户？",

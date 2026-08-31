@@ -231,7 +231,7 @@ export function createLearningLoopServer(
         await learningLoop.setAnswerRevealPreferenceAsync(auth, Boolean(body?.allow)),
       );
     }
-    if (method === "POST" && route === "/subscription") {
+    if (method === "POST" && route === "/subscription" && process.env.ENABLE_DEBUG_SUBSCRIPTION === "true") {
       return send(
         response,
         200,
