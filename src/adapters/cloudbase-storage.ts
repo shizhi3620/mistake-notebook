@@ -53,19 +53,9 @@ export function createCloudBaseNodeStorageVerifier(options: {
         };
       };
       const cloudbase = cloudbaseModule.default;
-      const secretId = process.env.TENCENTCLOUD_SECRETID?.trim();
-      const secretKey = process.env.TENCENTCLOUD_SECRETKEY?.trim();
-      if (!secretId || !secretKey) {
-        throw new Error(
-          "CloudBase storage credentials are not configured. Set TENCENTCLOUD_SECRETID and TENCENTCLOUD_SECRETKEY.",
-        );
-      }
       const app = cloudbase.init({
         env: options.env,
         region: options.region,
-        secretId,
-        secretKey,
-        sessionToken: process.env.TENCENTCLOUD_SESSIONTOKEN?.trim(),
       });
       const result = await app.getTempFileURL({ fileList: [fileId] });
       const file = result.fileList[0];
@@ -77,10 +67,7 @@ export function createCloudBaseNodeStorageVerifier(options: {
     deleteFile: async (fileId) => {
       const moduleName = "@cloudbase/node-sdk";
       const cloudbaseModule = (await import(moduleName)) as { default: { init(config: { env: string; region?: string; secretId?: string; secretKey?: string; sessionToken?: string }): CloudBaseApp } };
-      const secretId = process.env.TENCENTCLOUD_SECRETID?.trim();
-      const secretKey = process.env.TENCENTCLOUD_SECRETKEY?.trim();
-      if (!secretId || !secretKey) throw new Error("CloudBase storage credentials are not configured.");
-      const app = cloudbaseModule.default.init({ env: options.env, region: options.region, secretId, secretKey, sessionToken: process.env.TENCENTCLOUD_SESSIONTOKEN?.trim() });
+      const app = cloudbaseModule.default.init({ env: options.env, region: options.region });
       const result = await app.deleteFile({ fileList: [fileId] });
       const file = result.fileList[0];
       if (!file || file.code !== "SUCCESS") throw new Error("Uploaded photo could not be deleted.");

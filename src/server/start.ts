@@ -39,8 +39,6 @@ if (process.env.CLOUD_HOSTING === "true" && !mysqlConfig) {
 }
 if (process.env.CLOUD_HOSTING === "true") {
   requiredEnvironment("CLOUDBASE_ENV");
-  requiredEnvironment("TENCENTCLOUD_SECRETID");
-  requiredEnvironment("TENCENTCLOUD_SECRETKEY");
 }
 
 if (mysqlConfig) {
