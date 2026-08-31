@@ -33,6 +33,7 @@ export function createOpenAiCompatibleRecognitionClient(
       },
       body: JSON.stringify({
         model: options.model,
+        max_tokens: 600,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: SYSTEM_PROMPT },

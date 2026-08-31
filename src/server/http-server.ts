@@ -113,6 +113,12 @@ export function createLearningLoopServer(
         void send(response, 503, { error: "storage_unavailable" });
         return;
       }
+      if (isRecognitionFailure(error)) {
+        void send(response, 503, {
+          error: "题目识别服务暂时不可用，请重试或手动录入。",
+        });
+        return;
+      }
       const status = /log in again/i.test(message) ? 401 : 400;
       void send(response, status, { error: message });
     });
@@ -669,5 +675,12 @@ function isStorageFailure(error: unknown): boolean {
     candidate.name === "StorageUnavailableError" ||
     (typeof candidate.message === "string" &&
       /(?:mysql|database|storage)\s+(?:connection|unavailable|query|timeout)/i.test(candidate.message))
+  );
+}
+
+function isRecognitionFailure(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /^(?:Recognition request|Recognition provider)/.test(error.message)
   );
 }

@@ -113,8 +113,8 @@ function compressForRecognition(src) {
   return new Promise((resolve) => {
     wx.compressImage({
       src,
-      quality: 70,
-      compressedWidth: 1600,
+      quality: 55,
+      compressedWidth: 1024,
       success: (result) => resolve(result.tempFilePath),
       fail: () => resolve(src),
     });

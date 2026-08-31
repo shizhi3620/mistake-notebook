@@ -20,7 +20,11 @@ test("capture page compresses, uploads, and submits the selected image", async (
     },
   };
   const wx = {
-    compressImage: ({ success }: any) => success({ tempFilePath: "/tmp/compressed.jpg" }),
+    compressImage: ({ quality, compressedWidth, success }: any) => {
+      assert.equal(quality, 55);
+      assert.equal(compressedWidth, 1024);
+      success({ tempFilePath: "/tmp/compressed.jpg" });
+    },
     getFileSystemManager: () => ({
       readFile: ({ success }: any) => success({ data: "QUJD" }),
     }),
