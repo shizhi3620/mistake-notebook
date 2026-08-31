@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { readMysqlConnectionConfig, validateProductionMysqlConfig } from "../src/adapters/mysql-pool.ts";
+import {
+  readMysqlConnectionConfig,
+  shouldRetryMysqlWithoutTls,
+} from "../src/adapters/mysql-pool.ts";
 
-test("cloud hosting rejects MySQL with TLS disabled", () => {
-  assert.throws(() => validateProductionMysqlConfig({ host: "h", port: 3306, database: "d", user: "u", password: "p", ssl: false }, true), /MYSQL_SSL/);
-  validateProductionMysqlConfig({ host: "h", port: 3306, database: "d", user: "u", password: "p", ssl: true }, true);
+test("cloud hosting retries without TLS only when the server explicitly does not support it", () => {
+  const unsupported = new Error("Server does not support secure connection");
+  assert.equal(shouldRetryMysqlWithoutTls(unsupported, true, true), true);
+  assert.equal(shouldRetryMysqlWithoutTls(unsupported, false, true), false);
+  assert.equal(shouldRetryMysqlWithoutTls(unsupported, true, false), false);
+  assert.equal(shouldRetryMysqlWithoutTls(new Error("Access denied"), true, true), false);
 });
 
 test("MySQL configuration is absent only when every required value is absent", () => {

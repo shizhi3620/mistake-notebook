@@ -12,8 +12,8 @@ import {
   createMysqlPool,
   closeMysqlPool,
   readMysqlConnectionConfig,
+  shouldRetryMysqlWithoutTls,
   verifyMysqlPool,
-  validateProductionMysqlConfig,
 } from "../adapters/mysql-pool.ts";
 import { migrateMysqlSchema } from "../adapters/mysql-schema.ts";
 import { MysqlLearningLoopStore } from "../adapters/mysql-learning-loop-store.ts";
@@ -42,14 +42,27 @@ if (process.env.CLOUD_HOSTING === "true") {
 }
 
 if (mysqlConfig) {
-  validateProductionMysqlConfig(mysqlConfig, process.env.CLOUD_HOSTING === "true");
-  const configuredMysqlPool = createMysqlPool(mysqlConfig);
-  mysqlPool = configuredMysqlPool;
-  mysqlHealthCheck = async () => {
-    await verifyMysqlPool(configuredMysqlPool);
-  };
+  let configuredMysqlPool = createMysqlPool(mysqlConfig);
   try {
-    await verifyMysqlPool(configuredMysqlPool);
+    try {
+      await verifyMysqlPool(configuredMysqlPool);
+    } catch (error) {
+      if (
+        !shouldRetryMysqlWithoutTls(
+          error,
+          process.env.CLOUD_HOSTING === "true",
+          mysqlConfig.ssl,
+        )
+      ) {
+        throw error;
+      }
+      await closeMysqlPool(configuredMysqlPool);
+      console.warn(
+        "[mysql_tls_unavailable] Server does not support TLS; retrying over the Cloud Hosting private network.",
+      );
+      configuredMysqlPool = createMysqlPool({ ...mysqlConfig, ssl: false });
+      await verifyMysqlPool(configuredMysqlPool);
+    }
     await migrateMysqlSchema(configuredMysqlPool);
   } catch (error) {
     await closeMysqlPool(configuredMysqlPool);
@@ -59,6 +72,10 @@ if (mysqlConfig) {
       }`,
     );
   }
+  mysqlPool = configuredMysqlPool;
+  mysqlHealthCheck = async () => {
+    await verifyMysqlPool(configuredMysqlPool);
+  };
 }
 
 mkdirSync(dirname(databasePath), { recursive: true });

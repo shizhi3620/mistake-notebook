@@ -55,8 +55,17 @@ export function createMysqlPool(config: MysqlConnectionConfig): Pool {
   return createPool(options);
 }
 
-export function validateProductionMysqlConfig(config: MysqlConnectionConfig, cloudHosting: boolean): void {
-  if (cloudHosting && !config.ssl) throw new Error("MYSQL_SSL must remain enabled in Cloud Hosting.");
+export function shouldRetryMysqlWithoutTls(
+  error: unknown,
+  cloudHosting: boolean,
+  tlsEnabled: boolean,
+): boolean {
+  return (
+    cloudHosting &&
+    tlsEnabled &&
+    error instanceof Error &&
+    error.message.includes("Server does not support secure connection")
+  );
 }
 
 export async function verifyMysqlPool(pool: Pool): Promise<void> {
