@@ -31,6 +31,18 @@ After deployment, run `GET /healthz` and the fictional-account smoke test before
 all traffic to the new revision. Keep the previous revision available and record the
 release version, selected image, operator, approval and final traffic decision.
 
+### Gray Release Limitation
+
+The mini program currently calls the public HTTPS API through `wx.request` (see
+`miniprogram/services/api.js`). Cloud Hosting gray percentages and gray users apply only
+to `wx.callContainer`; public-domain requests always reach the current running revision.
+Therefore a gray setting is not a public-user canary. Validate the new revision first,
+then switch the current revision manually, run the smoke test again through the public
+domain, and monitor production metrics with the previous revision ready for rollback.
+
+Do not describe this as user-level gray release until the client is migrated to
+`wx.callContainer` and the login, upload, timeout, and real-device flows are revalidated.
+
 The Cloud Hosting process must set `CLOUD_HOSTING=true`. It refuses to start without a complete MySQL configuration; SQLite is for local development and migration only.
 
 ## Backup And Restore Drill
