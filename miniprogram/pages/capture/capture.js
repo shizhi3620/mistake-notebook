@@ -69,25 +69,16 @@ Page({
         "POST",
         `/drafts/${draft.id}/photo-credential`,
       );
+      const recognitionImagePath = await compressForRecognition(this.data.imagePath);
+      const imageDataUrl = await readImageDataUrl(recognitionImagePath);
       const upload = await new Promise((resolve, reject) => {
         wx.cloud.uploadFile({
           cloudPath: credential.imageKey,
-          filePath: this.data.imagePath,
+          filePath: recognitionImagePath,
           success: resolve,
           fail: reject,
         });
       });
-      const temporaryUrlResult = await new Promise((resolve, reject) => {
-        wx.cloud.getTempFileURL({
-          fileList: [upload.fileID],
-          success: resolve,
-          fail: reject,
-        });
-      });
-      const temporaryFile = temporaryUrlResult.fileList && temporaryUrlResult.fileList[0];
-      if (!temporaryFile || temporaryFile.status !== 0 || !temporaryFile.tempFileURL) {
-        throw new Error("无法获取图片临时地址，请稍后重试");
-      }
       const recognized = await api.request(
         "POST",
         `/drafts/${draft.id}/photo`,
@@ -95,7 +86,7 @@ Page({
           uploadToken: credential.uploadToken,
           fileId: upload.fileID,
           imageKey: credential.imageKey,
-          imageUrl: temporaryFile.tempFileURL,
+          imageDataUrl,
         },
       );
       wx.setStorageSync("currentDraft", recognized);
@@ -110,8 +101,31 @@ Page({
           if (!res.confirm) {
             this.manualEntry();
           }
-        },
-      });
+  },
+});
+
+function compressForRecognition(src) {
+  return new Promise((resolve) => {
+    wx.compressImage({
+      src,
+      quality: 70,
+      compressedWidth: 1600,
+      success: (result) => resolve(result.tempFilePath),
+      fail: () => resolve(src),
+    });
+  });
+}
+
+function readImageDataUrl(filePath) {
+  return new Promise((resolve, reject) => {
+    wx.getFileSystemManager().readFile({
+      filePath,
+      encoding: "base64",
+      success: (result) => resolve(`data:image/jpeg;base64,${result.data}`),
+      fail: reject,
+    });
+  });
+}
     } finally {
       this.setData({ uploading: false });
     }

@@ -18,6 +18,7 @@ import {
   InMemoryIdempotencyStore,
   type IdempotencyStore,
 } from "./idempotency-store.ts";
+import { assertCloudBaseFileOwnership } from "../adapters/cloudbase-storage.ts";
 
 export type LearningLoopServerDependencies = {
   learningLoop: LearningLoop;
@@ -364,12 +365,17 @@ export function createLearningLoopServer(
           String(body.uploadToken),
         );
         if (credential.draftId !== draftPhotoMatch.id) throw new Error("Upload credential is not available for this draft.");
+        const fileId = String(body.fileId);
+        assertCloudBaseFileOwnership(fileId, credential.imageKey);
+        const suppliedImageDataUrl = String(body.imageDataUrl ?? "");
         const suppliedImageUrl = String(body.imageUrl ?? "");
-        const uploaded = suppliedImageUrl.startsWith("https://")
+        const uploaded = suppliedImageDataUrl
+          ? { imageUrl: validateRecognitionImageDataUrl(suppliedImageDataUrl) }
+          : suppliedImageUrl.startsWith("https://")
           ? { imageUrl: suppliedImageUrl }
           : photoStorage
             ? await photoStorage.verifyUploadedFile({
-                fileId: String(body.fileId),
+                fileId,
                 expectedImageKey: credential.imageKey,
               })
             : (() => {
@@ -380,7 +386,7 @@ export function createLearningLoopServer(
         await learningLoop.completePhotoUploadAsync(
           auth,
           credential.uploadToken,
-          String(body.fileId),
+          fileId,
         );
         if (!recognitionClient) {
           throw new Error("题目识别服务未配置。请返回手动录入。");
@@ -572,6 +578,16 @@ export function createLearningLoopServer(
       throw error;
     }
   }
+}
+
+function validateRecognitionImageDataUrl(value: string): string {
+  if (!/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+    throw new Error("Recognition image must be a JPEG, PNG, or WebP data URL.");
+  }
+  if (value.length > 8_000_000) {
+    throw new Error("Recognition image is too large.");
+  }
+  return value;
 }
 
 

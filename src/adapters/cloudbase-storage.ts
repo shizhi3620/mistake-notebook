@@ -7,17 +7,7 @@ export function createCloudBaseStorageVerifier(options: {
       fileId: string;
       expectedImageKey: string;
     }): Promise<{ imageUrl: string }> {
-      if (!input.fileId.startsWith("cloud://")) {
-        throw new Error("Uploaded photo has an invalid CloudBase file ID.");
-      }
-      const withoutScheme = input.fileId.slice("cloud://".length);
-      const separator = withoutScheme.indexOf("/");
-      if (
-        separator < 0 ||
-        withoutScheme.slice(separator + 1) !== input.expectedImageKey
-      ) {
-        throw new Error("Uploaded photo does not belong to this upload credential.");
-      }
+      assertCloudBaseFileOwnership(input.fileId, input.expectedImageKey);
       const imageUrl = await options.getTemporaryUrl(input.fileId);
       if (!imageUrl.startsWith("https://")) {
         throw new Error("Uploaded photo could not be opened securely.");
@@ -32,6 +22,20 @@ export function createCloudBaseStorageVerifier(options: {
       await options.deleteFile(fileId);
     },
   };
+}
+
+export function assertCloudBaseFileOwnership(
+  fileId: string,
+  expectedImageKey: string,
+): void {
+  if (!fileId.startsWith("cloud://")) {
+    throw new Error("Uploaded photo has an invalid CloudBase file ID.");
+  }
+  const withoutScheme = fileId.slice("cloud://".length);
+  const separator = withoutScheme.indexOf("/");
+  if (separator < 0 || withoutScheme.slice(separator + 1) !== expectedImageKey) {
+    throw new Error("Uploaded photo does not belong to this upload credential.");
+  }
 }
 
 export function createCloudBaseNodeStorageVerifier(options: {

@@ -432,13 +432,13 @@ test("the HTTP API accepts a CloudBase file ID only after an upload credential",
     learningLoop,
     photoStorage: {
       verifyUploadedFile: async ({ fileId, expectedImageKey }) => {
-        assert.equal(fileId, "cloud://prod/photo");
         assert.match(expectedImageKey, /^questions\//);
+        assert.equal(fileId, `cloud://prod/${expectedImageKey}`);
         return { imageUrl: "https://storage.example/photo.jpg" };
       },
     },
     recognitionClient: async ({ imageDataUrl }) => {
-      assert.equal(imageDataUrl, "https://storage.example/photo.jpg");
+      assert.equal(imageDataUrl, "data:image/jpeg;base64,QUJD");
       return { stem: "1 + 1 = ?", formulas: [], confidence: 0.9, region: null };
     },
     weChatIdentityResolver: async () => ({ subject: "cloudbase-test" }),
@@ -472,10 +472,11 @@ test("the HTTP API accepts a CloudBase file ID only after an upload credential",
     const credential = await call(`/drafts/${draft.body.id}/photo-credential`, {}, token);
     const recognized = await call(`/drafts/${draft.body.id}/photo`, {
       uploadToken: credential.body.uploadToken,
-      fileId: "cloud://prod/photo",
+      fileId: `cloud://prod/${credential.body.imageKey}`,
+      imageDataUrl: "data:image/jpeg;base64,QUJD",
     }, token);
 
-    assert.equal(recognized.status, 200);
+    assert.equal(recognized.status, 200, JSON.stringify(recognized.body));
     assert.equal(recognized.body.recognition.stem, "1 + 1 = ?");
   } finally {
     server.close();

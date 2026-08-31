@@ -93,6 +93,8 @@ const recognitionClient = deepSeekApiKey
       baseUrl: process.env.LLM_BASE_URL ?? "https://api.deepseek.com",
       apiKey: deepSeekApiKey,
       model: process.env.RECOGNITION_MODEL ?? "deepseek-v4-flash-vision-exp",
+      timeoutMs: 20_000,
+      maxRetries: 0,
     })
   : undefined;
 
