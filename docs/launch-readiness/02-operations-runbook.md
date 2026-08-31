@@ -2,10 +2,34 @@
 
 ## Deploy
 
+The repository release gate is intentionally two-stage: GitHub Actions runs CI on pull
+requests and pushes to `main`; production deployment is performed manually in the Cloud
+Hosting console. Keep the console's production environment variables and secrets there;
+do not copy them into GitHub Actions or the repository.
+
+This deployment uses one Cloud Hosting pipeline only. Keep its source branch fixed to
+`main`. Feature and test branches are validated by GitHub Actions and local Docker; do
+not switch the production pipeline between branches during normal development. A
+temporary branch switch is allowed only for an explicitly approved cloud build test and
+must be followed by switching the pipeline back to `main` before any production release.
+
+Create a version tag after review (for example `v1.0.0`). Wait for CI and the console's
+image build to complete, then select the image built from that exact commit/tag in the
+Cloud Hosting deployment image dropdown. Do not enable source-push auto-deploy for the
+production service.
+
+Before clicking release, the approver verifies the image commit/digest, migration plan,
+backup status and rollback revision. The console release must create a new revision while
+retaining the previous revision for rollback.
+
 1. Create a CloudBase environment and deploy the HTTP container to Cloud Hosting.
 2. Configure `WECHAT_APP_ID`, `WECHAT_APP_SECRET`, `DEEPSEEK_API_KEY` (when AI is enabled), and `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_SSL=true` as Cloud Hosting secrets.
 3. Confirm `GET /healthz` through the registered Cloud Hosting HTTPS path.
 4. Configure alerts from JSON request logs: any sustained HTTP 5xx rate or failed health probe pages the release owner.
+
+After deployment, run `GET /healthz` and the fictional-account smoke test before routing
+all traffic to the new revision. Keep the previous revision available and record the
+release version, selected image, operator, approval and final traffic decision.
 
 The Cloud Hosting process must set `CLOUD_HOSTING=true`. It refuses to start without a complete MySQL configuration; SQLite is for local development and migration only.
 
