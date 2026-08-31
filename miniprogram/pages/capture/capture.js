@@ -94,13 +94,18 @@ Page({
     } catch (error) {
       wx.showModal({
         title: "上传或识别失败",
-        content: `${error && error.message ? error.message : "识别服务暂不可用"}。可以重试，或改为手动录入。`,
+        content: `${errorMessage(error)}。可以重试，或改为手动录入。`,
         confirmText: "重试",
         cancelText: "手动录入",
         success: (res) => {
           if (!res.confirm) {
             this.manualEntry();
           }
+        },
+      });
+    } finally {
+      this.setData({ uploading: false });
+    }
   },
 });
 
@@ -126,9 +131,9 @@ function readImageDataUrl(filePath) {
     });
   });
 }
-    } finally {
-      this.setData({ uploading: false });
-    }
-  },
 
-});
+function errorMessage(error) {
+  if (error && error.message) return error.message;
+  if (error && error.errMsg) return error.errMsg;
+  return "识别服务暂不可用";
+}

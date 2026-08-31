@@ -427,10 +427,18 @@ export function createLearningLoopServer(
     }
     const draftPhotoCredentialMatch = match(route, "/drafts/:id/photo-credential");
     if (method === "POST" && draftPhotoCredentialMatch) {
+      const credential = await learningLoop.requestPhotoUploadAsync(
+        auth,
+        draftPhotoCredentialMatch.id,
+      );
       return send(
         response,
         200,
-        await learningLoop.requestPhotoUploadAsync(auth, draftPhotoCredentialMatch.id),
+        {
+          uploadToken: credential.uploadToken,
+          imageKey: credential.imageKey,
+          expiresAt: credential.expiresAt,
+        },
       );
     }
     const draftConfirmMatch = match(route, "/drafts/:id/confirm");

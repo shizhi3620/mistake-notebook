@@ -470,6 +470,8 @@ test("the HTTP API accepts a CloudBase file ID only after an upload credential",
     const child = await childResponse.json();
     const draft = await call("/drafts", { childProfileId: child.id, source: "camera" }, token);
     const credential = await call(`/drafts/${draft.body.id}/photo-credential`, {}, token);
+    assert.equal(credential.body.parentAccountId, undefined);
+    assert.equal(credential.body.usedAt, undefined);
     const recognized = await call(`/drafts/${draft.body.id}/photo`, {
       uploadToken: credential.body.uploadToken,
       fileId: `cloud://prod/${credential.body.imageKey}`,
