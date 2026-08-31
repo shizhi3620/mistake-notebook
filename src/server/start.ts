@@ -6,17 +6,21 @@ loadDotEnv();
 import { createOpenAiCompatibleExplanationProvider } from "../adapters/openai-compatible-explanation.ts";
 import { createOpenAiCompatibleRecognitionClient } from "../adapters/openai-compatible-recognition.ts";
 import { createWeChatIdentityResolver } from "../adapters/wechat-login.ts";
+import { createWeChatSubscriptionReminderSender } from "../adapters/wechat-subscription-reminder.ts";
 import { createCloudBaseNodeStorageVerifier } from "../adapters/cloudbase-storage.ts";
 import {
   createMysqlPool,
   closeMysqlPool,
   readMysqlConnectionConfig,
   verifyMysqlPool,
+  validateProductionMysqlConfig,
 } from "../adapters/mysql-pool.ts";
 import { migrateMysqlSchema } from "../adapters/mysql-schema.ts";
+import { MysqlLearningLoopStore } from "../adapters/mysql-learning-loop-store.ts";
 import { LearningLoop } from "../learning-loop.ts";
 import { SqliteLearningLoopStore } from "../sqlite-learning-loop-store.ts";
 import { createLearningLoopServer } from "./http-server.ts";
+import { MysqlIdempotencyStore } from "./idempotency-store.ts";
 
 const deepSeekApiKey = process.env.DEEPSEEK_API_KEY;
 const weChatAppId = requiredEnvironment("WECHAT_APP_ID");
@@ -33,8 +37,14 @@ if (process.env.CLOUD_HOSTING === "true" && !mysqlConfig) {
     "MYSQL_HOST, MYSQL_DATABASE, MYSQL_USER, and MYSQL_PASSWORD are required in Cloud Hosting.",
   );
 }
+if (process.env.CLOUD_HOSTING === "true") {
+  requiredEnvironment("CLOUDBASE_ENV");
+  requiredEnvironment("TENCENTCLOUD_SECRETID");
+  requiredEnvironment("TENCENTCLOUD_SECRETKEY");
+}
 
 if (mysqlConfig) {
+  validateProductionMysqlConfig(mysqlConfig, process.env.CLOUD_HOSTING === "true");
   const configuredMysqlPool = createMysqlPool(mysqlConfig);
   mysqlPool = configuredMysqlPool;
   mysqlHealthCheck = async () => {
@@ -71,22 +81,43 @@ const recognitionClient = deepSeekApiKey
     })
   : undefined;
 
-const learningLoop = new LearningLoop(
-  new SqliteLearningLoopStore(databasePath),
-  { explanationProvider },
-);
+const learningStore = mysqlPool
+  ? new MysqlLearningLoopStore(mysqlPool)
+  : new SqliteLearningLoopStore(databasePath);
+
 const photoStorage = process.env.CLOUDBASE_ENV
   ? createCloudBaseNodeStorageVerifier({
       env: process.env.CLOUDBASE_ENV,
       region: process.env.CLOUDBASE_REGION ?? "ap-shanghai",
     })
   : undefined;
+const reminderTemplateId = process.env.WECHAT_REMINDER_TEMPLATE_ID?.trim();
+const reminderSchedulerSecret = reminderTemplateId
+  ? requiredEnvironment("REMINDER_SCHEDULER_SECRET")
+  : undefined;
+const reminderSender = reminderTemplateId
+  ? createWeChatSubscriptionReminderSender({
+      appId: weChatAppId,
+      appSecret: weChatAppSecret,
+      templateId: reminderTemplateId,
+      nicknameField: requiredEnvironment("WECHAT_REMINDER_NICKNAME_FIELD"),
+      dueCountField: requiredEnvironment("WECHAT_REMINDER_DUE_COUNT_FIELD"),
+      resolveOpenId: async (parentAccountId) => learningStore.findWeChatSubject(parentAccountId),
+    })
+  : undefined;
+const learningLoop = new LearningLoop(learningStore, {
+  explanationProvider,
+  imageDeleter: photoStorage?.deleteUploadedFile,
+  reminderSender,
+});
 
 const server = createLearningLoopServer({
   learningLoop,
   healthCheck: mysqlHealthCheck,
+  idempotencyStore: mysqlPool ? new MysqlIdempotencyStore(mysqlPool) : undefined,
   photoStorage,
   recognitionClient,
+  reminderSchedulerSecret,
   log: (event) => console.log(JSON.stringify(event)),
   weChatIdentityResolver: createWeChatIdentityResolver({
     appId: weChatAppId,

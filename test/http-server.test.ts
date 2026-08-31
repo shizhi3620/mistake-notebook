@@ -3,10 +3,97 @@ import type { Server } from "node:http";
 import test from "node:test";
 
 import { LearningLoop } from "../src/learning-loop.ts";
-import { createLearningLoopServer } from "../src/server/http-server.ts";
+import { createLearningLoopServer, type LearningLoopServerDependencies } from "../src/server/http-server.ts";
+import { AiRateLimiter, AiUsageLedger } from "../src/server/http-server.ts";
+import { InMemoryIdempotencyStore } from "../src/server/idempotency-store.ts";
+
+test("AI rate limiter isolates tenant keys and expires entries", () => {
+  let now = 0;
+  const limiter = new AiRateLimiter(2, () => now);
+  assert.equal(limiter.allow("account-a"), true);
+  assert.equal(limiter.allow("account-a"), true);
+  assert.equal(limiter.allow("account-a"), false);
+  assert.equal(limiter.remaining("account-a"), 0);
+  assert.equal(limiter.allow("account-b"), true);
+  now = 60_001;
+  assert.equal(limiter.allow("account-a"), true);
+  assert.equal(limiter.remaining("account-a"), 1);
+});
+
+test("AI usage ledger enforces monthly tenant quota and resets by month", () => {
+  let now = Date.parse("2026-08-30T00:00:00Z");
+  const ledger = new AiUsageLedger(2, () => now);
+  assert.deepEqual(ledger.consume("account-a"), { allowed: true, used: 1, limit: 2 });
+  assert.deepEqual(ledger.consume("account-a"), { allowed: true, used: 2, limit: 2 });
+  assert.deepEqual(ledger.consume("account-a"), { allowed: false, used: 2, limit: 2 });
+  assert.deepEqual(ledger.consume("account-b"), { allowed: true, used: 1, limit: 2 });
+  now = Date.parse("2026-09-01T00:00:00Z");
+  assert.deepEqual(ledger.consume("account-a"), { allowed: true, used: 1, limit: 2 });
+});
+
+test("idempotency store replays completed responses and releases failures", async () => {
+  const store = new InMemoryIdempotencyStore();
+  assert.deepEqual(await store.claim("parent", "operation", "key"), { state: "claimed" });
+  assert.deepEqual(await store.claim("parent", "operation", "key"), { state: "pending" });
+  await store.complete("parent", "operation", "key", { id: "first" });
+  assert.deepEqual(await store.claim("parent", "operation", "key"), {
+    state: "completed",
+    response: { id: "first" },
+  });
+  assert.deepEqual(await store.claim("parent", "operation", "retry"), { state: "claimed" });
+  await store.release("parent", "operation", "retry");
+  assert.deepEqual(await store.claim("parent", "operation", "retry"), { state: "claimed" });
+});
+
+test("account deletion invalidates the session and removes child data", async () => {
+  await withServer(async (api) => {
+    const login = await api.call("POST", "/session", { body: { code: "delete-account" } });
+    const token = login.body.session.token as string;
+    await api.call("POST", "/guardianship/confirm", { token });
+    const child = await api.call("POST", "/children", {
+      token,
+      body: { nickname: "测试孩子", grade: 3 },
+    });
+    assert.equal(child.status, 200);
+
+    const deleted = await api.call("DELETE", "/account", { token });
+    assert.deepEqual(deleted, { status: 200, body: { ok: true } });
+
+    const oldSession = await api.call("GET", "/home", { token });
+    assert.equal(oldSession.status, 401);
+    assert.match(oldSession.body.error, /log in again/i);
+  });
+});
+
+test("reminder dispatch endpoint requires the scheduler secret", async () => {
+  const server = createLearningLoopServer({
+    learningLoop: new LearningLoop(),
+    reminderSchedulerSecret: "scheduler-secret",
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  const call = (secret?: string) => fetch(
+    `http://127.0.0.1:${port}/internal/reminders/dispatch`,
+    {
+      method: "POST",
+      headers: secret ? { "x-scheduler-secret": secret } : {},
+    },
+  );
+  try {
+    assert.equal((await call()).status, 401);
+    assert.equal((await call("wrong-secret")).status, 401);
+    const accepted = await call("scheduler-secret");
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(await accepted.json(), { outcomes: [] });
+  } finally {
+    server.close();
+  }
+});
 
 async function withServer(
   run: (api: ApiClient) => Promise<void>,
+  overrides: Partial<LearningLoopServerDependencies> = {},
 ): Promise<void> {
   let now = Date.parse("2026-08-27T10:00:00+08:00");
   const learningLoop = new LearningLoop(undefined, {
@@ -30,6 +117,7 @@ async function withServer(
       confidence: 0.95,
       region: null,
     }),
+    ...overrides,
   });
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -48,7 +136,7 @@ type ApiClient = {
   call(
     method: string,
     path: string,
-    options?: { body?: unknown; token?: string },
+    options?: { body?: unknown; token?: string; idempotencyKey?: string },
   ): Promise<{ status: number; body: any }>;
   advanceTo(iso: string): void;
 };
@@ -66,6 +154,9 @@ function makeApiClient(
           "content-type": "application/json",
           ...(options.token
             ? { authorization: `Bearer ${options.token}` }
+            : {}),
+          ...(options.idempotencyKey
+            ? { "idempotency-key": options.idempotencyKey }
             : {}),
         },
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -198,6 +289,67 @@ test("the HTTP API carries a family through the full learning loop", async () =>
 
     const entitlements = await api.call("GET", "/entitlements", { token });
     assert.equal(entitlements.body.plan, "free");
+  });
+});
+
+test("Idempotency-Key replays the first successful mistake creation", async () => {
+  await withServer(async (api) => {
+    const login = await api.call("POST", "/session", { body: { code: "idempotency" } });
+    const token = login.body.session.token as string;
+    await api.call("POST", "/guardianship/confirm", { token });
+    const child = await api.call("POST", "/children", {
+      token,
+      body: { nickname: "小明", grade: 3 },
+    });
+    const draft = await api.call("POST", "/drafts", {
+      token,
+      body: { childProfileId: child.body.id, source: "manual" },
+    });
+    const confirmOptions = {
+      token,
+      idempotencyKey: "confirm-key-1",
+      body: { stem: "1 + 1 = ?" },
+    };
+    const question = await api.call("POST", `/drafts/${draft.body.id}/confirm`, confirmOptions);
+    const questionReplay = await api.call("POST", `/drafts/${draft.body.id}/confirm`, confirmOptions);
+    assert.deepEqual(questionReplay, question);
+    const options = {
+      token,
+      idempotencyKey: "mistake-key-1",
+      body: { primaryKnowledgePoint: "加法" },
+    };
+    const first = await api.call("POST", `/questions/${question.body.id}/mistake`, options);
+    const replay = await api.call("POST", `/questions/${question.body.id}/mistake`, options);
+    assert.equal(first.status, 200);
+    assert.deepEqual(replay, first);
+    const mistakes = await api.call("GET", `/mistakes?childProfileId=${child.body.id}`, { token });
+    assert.equal(mistakes.body.length, 1);
+  });
+});
+
+test("a competing Idempotency-Key request returns 409", async () => {
+  await withServer(async (api) => {
+    const login = await api.call("POST", "/session", { body: { code: "pending-idempotency" } });
+    const token = login.body.session.token as string;
+    await api.call("POST", "/guardianship/confirm", { token });
+    const child = await api.call("POST", "/children", { token, body: { nickname: "小明", grade: 3 } });
+    const draft = await api.call("POST", "/drafts", { token, body: { childProfileId: child.body.id, source: "manual" } });
+    const question = await api.call("POST", `/drafts/${draft.body.id}/confirm`, { token, body: { stem: "1+1=?" } });
+    const response = await api.call("POST", `/questions/${question.body.id}/mistake`, {
+      token,
+      idempotencyKey: "pending-key",
+      body: { primaryKnowledgePoint: "加法" },
+    });
+    assert.deepEqual(response, {
+      status: 409,
+      body: { error: "idempotency_request_in_progress" },
+    });
+  }, {
+    idempotencyStore: {
+      async claim() { return { state: "pending" }; },
+      async complete() {},
+      async release() {},
+    },
   });
 });
 

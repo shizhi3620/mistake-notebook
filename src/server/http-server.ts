@@ -1,5 +1,6 @@
 import {
   randomUUID,
+  timingSafeEqual,
 } from "node:crypto";
 import {
   createServer,
@@ -13,6 +14,10 @@ import type {
   MistakeFilters,
   QuestionRecognition,
 } from "../learning-loop.ts";
+import {
+  InMemoryIdempotencyStore,
+  type IdempotencyStore,
+} from "./idempotency-store.ts";
 
 export type LearningLoopServerDependencies = {
   learningLoop: LearningLoop;
@@ -30,6 +35,10 @@ export type LearningLoopServerDependencies = {
   recognitionClient?: (input: {
     imageDataUrl: string;
   }) => Promise<QuestionRecognition>;
+  maxAiRequestsPerMinute?: number;
+  maxAiRequestsPerMonth?: number;
+  reminderSchedulerSecret?: string;
+  idempotencyStore?: IdempotencyStore;
 };
 
 export type HttpRequestLogEvent = {
@@ -41,11 +50,45 @@ export type HttpRequestLogEvent = {
   durationMs: number;
 };
 
+export class AiRateLimiter {
+  private readonly requests = new Map<string, number[]>();
+  constructor(private readonly maxRequestsPerMinute = 30, private readonly now: () => number = Date.now) {}
+  allow(key: string): boolean {
+    const current = this.now();
+    const recent = (this.requests.get(key) ?? []).filter((timestamp) => current - timestamp < 60_000);
+    if (recent.length >= this.maxRequestsPerMinute) { this.requests.set(key, recent); return false; }
+    recent.push(current); this.requests.set(key, recent); return true;
+  }
+  remaining(key: string): number {
+    const current = this.now();
+    const recent = (this.requests.get(key) ?? []).filter((timestamp) => current - timestamp < 60_000);
+    this.requests.set(key, recent);
+    return Math.max(0, this.maxRequestsPerMinute - recent.length);
+  }
+}
+
+export class AiUsageLedger {
+  private readonly usage = new Map<string, { month: string; count: number }>();
+  constructor(private readonly monthlyLimit = 500, private readonly now: () => number = Date.now) {}
+  consume(key: string): { allowed: boolean; used: number; limit: number } {
+    const month = new Date(this.now()).toISOString().slice(0, 7);
+    const previous = this.usage.get(key);
+    const entry = previous?.month === month ? previous : { month, count: 0 };
+    if (entry.count >= this.monthlyLimit) return { allowed: false, used: entry.count, limit: this.monthlyLimit };
+    entry.count += 1; this.usage.set(key, entry);
+    return { allowed: true, used: entry.count, limit: this.monthlyLimit };
+  }
+}
+
 export function createLearningLoopServer(
   dependencies: LearningLoopServerDependencies,
 ): Server {
   const { learningLoop, recognitionClient, weChatIdentityResolver, photoStorage, healthCheck } = dependencies;
   const log = dependencies.log ?? (() => {});
+  const maxAiRequestsPerMinute = Math.max(1, dependencies.maxAiRequestsPerMinute ?? 30);
+  const aiRateLimiter = new AiRateLimiter(maxAiRequestsPerMinute);
+  const aiUsageLedger = new AiUsageLedger(dependencies.maxAiRequestsPerMonth ?? 500);
+  const idempotencyStore = dependencies.idempotencyStore ?? new InMemoryIdempotencyStore();
 
   return createServer((request, response) => {
     const requestId = randomUUID();
@@ -82,6 +125,23 @@ export function createLearningLoopServer(
     const path = url.pathname.replace(/\/+$/, "") || "/";
     const method = request.method ?? "GET";
 
+    const aiRoute = path.includes("/recognition") || path.endsWith("/explanation") || path.includes("/homework");
+    if (aiRoute) {
+      const now = Date.now();
+      const key = request.headers.authorization?.replace(/^Bearer\s+/i, "") || request.headers["x-forwarded-for"]?.toString().split(",")[0].trim() || request.socket.remoteAddress || "unknown";
+      response.setHeader("x-ai-rate-limit", String(maxAiRequestsPerMinute));
+      const usage = aiUsageLedger.consume(key);
+      response.setHeader("x-ai-monthly-limit", String(usage.limit));
+      response.setHeader("x-ai-monthly-used", String(usage.used));
+      if (!usage.allowed) { await send(response, 429, { error: "ai_quota_exceeded", retryAfterSeconds: 3600 }); return; }
+      if (!aiRateLimiter.allow(key)) {
+        response.setHeader("x-ai-rate-limit-remaining", "0");
+        await send(response, 429, { error: "ai_rate_limited", retryAfterSeconds: 60 });
+        return;
+      }
+      response.setHeader("x-ai-rate-limit-remaining", String(aiRateLimiter.remaining(key)));
+    }
+
     if (method === "GET" && path === "/healthz") {
       try {
         await healthCheck?.();
@@ -89,6 +149,28 @@ export function createLearningLoopServer(
       } catch {
         await send(response, 503, { status: "unavailable", error: "storage_unavailable" });
       }
+      return;
+    }
+
+    if (method === "POST" && path === "/internal/reminders/dispatch") {
+      const configuredSecret = dependencies.reminderSchedulerSecret;
+      if (!configuredSecret) {
+        await send(response, 404, { error: "Not found." });
+        return;
+      }
+      const suppliedSecret = String(request.headers["x-scheduler-secret"] ?? "");
+      const expected = Buffer.from(configuredSecret);
+      const supplied = Buffer.from(suppliedSecret);
+      if (
+        expected.length !== supplied.length ||
+        !timingSafeEqual(expected, supplied)
+      ) {
+        await send(response, 401, { error: "Unauthorized." });
+        return;
+      }
+      await send(response, 200, {
+        outcomes: await learningLoop.dispatchDueRemindersAsync(),
+      });
       return;
     }
 
@@ -108,48 +190,52 @@ export function createLearningLoopServer(
       send(
         response,
         200,
-        await learningLoop.startWeChatLogin(identity.subject),
+        await learningLoop.startWeChatLoginAsync(identity.subject),
       );
       return;
     }
 
-    const guardian = await learningLoop.resumeSession(bearerToken(request));
+    const guardian = await learningLoop.resumeSessionAsync(bearerToken(request));
     const auth = guardian.id;
 
     if (method === "POST" && route === "/guardianship/confirm") {
-      return send(response, 200, await learningLoop.confirmGuardianship(auth));
+      return send(response, 200, await learningLoop.confirmGuardianshipAsync(auth));
     }
     if (method === "GET" && route === "/children") {
-      return send(response, 200, await learningLoop.listChildProfiles(auth));
+      return send(response, 200, await learningLoop.listChildProfilesAsync(auth));
     }
     if (method === "POST" && route === "/children") {
-      return send(response, 200, await learningLoop.createChildProfile(auth, body));
+      return send(response, 200, await learningLoop.createChildProfileAsync(auth, body));
     }
     if (method === "GET" && route === "/home") {
-      return send(response, 200, await learningLoop.getHomeOverview(auth));
+      return send(response, 200, await learningLoop.getHomeOverviewAsync(auth));
     }
     if (method === "GET" && route === "/entitlements") {
-      return send(response, 200, await learningLoop.getEntitlements(auth));
+      return send(response, 200, await learningLoop.getEntitlementsAsync(auth));
+    }
+    if (method === "DELETE" && route === "/account") {
+      await learningLoop.deleteParentAccountAsync(auth);
+      return send(response, 200, { ok: true });
     }
     if (method === "PUT" && route === "/settings/answer-reveal") {
       return send(
         response,
         200,
-        await learningLoop.setAnswerRevealPreference(auth, Boolean(body?.allow)),
+        await learningLoop.setAnswerRevealPreferenceAsync(auth, Boolean(body?.allow)),
       );
     }
     if (method === "POST" && route === "/subscription") {
       return send(
         response,
         200,
-        await learningLoop.grantSubscription(auth, body?.plan),
+        await learningLoop.grantSubscriptionAsync(auth, body?.plan),
       );
     }
     if (method === "POST" && route === "/drafts") {
       return send(
         response,
         200,
-        await learningLoop.startQuestionDraft(
+        await learningLoop.startQuestionDraftAsync(
           auth,
           String(body?.childProfileId),
           body?.source,
@@ -160,7 +246,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        await learningLoop.createHomeworkReview(
+        await learningLoop.createHomeworkReviewAsync(
           auth,
           String(body?.childProfileId),
           body?.recognition,
@@ -171,7 +257,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        await learningLoop.startReview(auth, String(body?.mistakeId), {
+        await learningLoop.startReviewAsync(auth, String(body?.mistakeId), {
           exercise: body?.exercise,
         }),
       );
@@ -180,7 +266,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        await learningLoop.getDueReviews(
+        await learningLoop.getDueReviewsAsync(
           auth,
           String(url.searchParams.get("childProfileId")),
         ),
@@ -208,7 +294,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        await learningLoop.listMistakes(
+        await learningLoop.listMistakesAsync(
           auth,
           String(url.searchParams.get("childProfileId")),
           filters,
@@ -219,7 +305,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        await learningLoop.getWeeklyReport(
+        await learningLoop.getWeeklyReportAsync(
           auth,
           String(url.searchParams.get("childProfileId")),
         ),
@@ -231,16 +317,16 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        await learningLoop.updateChildProfile(auth, childMatch.id, body),
+        await learningLoop.updateChildProfileAsync(auth, childMatch.id, body),
       );
     }
     const childSelectMatch = match(route, "/children/:id/select");
     if (method === "POST" && childSelectMatch) {
-      await learningLoop.selectChildProfile(auth, childSelectMatch.id);
+      await learningLoop.selectChildProfileAsync(auth, childSelectMatch.id);
       return send(response, 200, { ok: true });
     }
     if (method === "DELETE" && childMatch) {
-      await learningLoop.deleteChildProfile(auth, childMatch.id);
+      await learningLoop.deleteChildProfileAsync(auth, childMatch.id);
       return send(response, 200, { ok: true });
     }
     const childRemindersMatch = match(route, "/children/:id/reminders");
@@ -248,7 +334,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        await learningLoop.updateReminderSettings(auth, childRemindersMatch.id, {
+        await learningLoop.updateReminderSettingsAsync(auth, childRemindersMatch.id, {
           enabled: Boolean(body?.enabled),
           hourOfDay: Number(body?.hourOfDay),
         }),
@@ -260,26 +346,24 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        await learningLoop.updateQuestionDraft(auth, draftMatch.id, {
+        await learningLoop.updateQuestionDraftAsync(auth, draftMatch.id, {
           crop: body?.crop,
           rotationDegrees: body?.rotationDegrees,
         }),
       );
     }
     if (method === "DELETE" && draftMatch) {
-      await learningLoop.cancelQuestionDraft(auth, draftMatch.id);
+      await learningLoop.cancelQuestionDraftAsync(auth, draftMatch.id);
       return send(response, 200, { ok: true });
     }
     const draftPhotoMatch = match(route, "/drafts/:id/photo");
     if (method === "POST" && draftPhotoMatch) {
       if (body?.fileId && body?.uploadToken) {
-        const credential = await learningLoop.completePhotoUpload(
+        const credential = await learningLoop.getPhotoUploadCredentialAsync(
           auth,
           String(body.uploadToken),
         );
-        if (!credential.imageKey) {
-          throw new Error("Uploaded photo is not attached to this draft.");
-        }
+        if (credential.draftId !== draftPhotoMatch.id) throw new Error("Upload credential is not available for this draft.");
         const suppliedImageUrl = String(body.imageUrl ?? "");
         const uploaded = suppliedImageUrl.startsWith("https://")
           ? { imageUrl: suppliedImageUrl }
@@ -293,24 +377,29 @@ export function createLearningLoopServer(
                   "Photo storage URL is not available. Configure client-side CloudBase temporary URL or server storage credentials.",
                 );
               })();
+        await learningLoop.completePhotoUploadAsync(
+          auth,
+          credential.uploadToken,
+          String(body.fileId),
+        );
         if (!recognitionClient) {
           throw new Error("题目识别服务未配置。请返回手动录入。");
         }
         return send(
           response,
           200,
-          await learningLoop.recordQuestionRecognition(
+          await learningLoop.recordQuestionRecognitionAsync(
             auth,
             draftPhotoMatch.id,
             await recognitionClient({ imageDataUrl: uploaded.imageUrl }),
           ),
         );
       }
-      const credential = await learningLoop.requestPhotoUpload(
+      const credential = await learningLoop.requestPhotoUploadAsync(
         auth,
         draftPhotoMatch.id,
       );
-      await learningLoop.completePhotoUpload(auth, credential.uploadToken);
+      await learningLoop.completePhotoUploadAsync(auth, credential.uploadToken);
 
       if (!recognitionClient) {
         throw new Error(
@@ -321,7 +410,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        await learningLoop.recordQuestionRecognition(
+        await learningLoop.recordQuestionRecognitionAsync(
           auth,
           draftPhotoMatch.id,
           await recognitionClient({
@@ -335,18 +424,20 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        await learningLoop.requestPhotoUpload(auth, draftPhotoCredentialMatch.id),
+        await learningLoop.requestPhotoUploadAsync(auth, draftPhotoCredentialMatch.id),
       );
     }
     const draftConfirmMatch = match(route, "/drafts/:id/confirm");
     if (method === "POST" && draftConfirmMatch) {
-      return send(
+      return sendIdempotent(
+        request,
         response,
-        200,
-        await learningLoop.confirmQuestion(auth, draftConfirmMatch.id, {
-          stem: String(body?.stem ?? ""),
-          studentAnswer: body?.studentAnswer,
-        }),
+        auth,
+        `confirm-question:${draftConfirmMatch.id}`,
+        () => learningLoop.confirmQuestionAsync(auth, draftConfirmMatch.id, {
+            stem: String(body?.stem ?? ""),
+            studentAnswer: body?.studentAnswer,
+          }),
       );
     }
 
@@ -355,7 +446,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        await learningLoop.getHomeworkReview(auth, homeworkReviewMatch.id),
+        await learningLoop.getHomeworkReviewAsync(auth, homeworkReviewMatch.id),
       );
     }
     const homeworkQuestionConfirmMatch = match(
@@ -363,21 +454,23 @@ export function createLearningLoopServer(
       "/homework-reviews/:reviewId/questions/:candidateId/confirm",
     );
     if (method === "POST" && homeworkQuestionConfirmMatch) {
-      return send(
+      return sendIdempotent(
+        request,
         response,
-        200,
-        await learningLoop.confirmHomeworkQuestion(
-          auth,
-          homeworkQuestionConfirmMatch.reviewId,
-          homeworkQuestionConfirmMatch.candidateId,
-          {
+        auth,
+        `confirm-homework:${homeworkQuestionConfirmMatch.candidateId}`,
+        () => learningLoop.confirmHomeworkQuestionAsync(
+            auth,
+            homeworkQuestionConfirmMatch.reviewId,
+            homeworkQuestionConfirmMatch.candidateId,
+            {
             verdict: body?.verdict,
             stem: body?.stem,
             studentAnswer: body?.studentAnswer,
             primaryKnowledgePoint: body?.primaryKnowledgePoint,
             secondaryKnowledgePoints: body?.secondaryKnowledgePoints,
             mistakeCause: body?.mistakeCause,
-          },
+            },
         ),
       );
     }
@@ -397,7 +490,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        await learningLoop.recordStudentAnswer(auth, studentAnswerMatch.id, {
+      await learningLoop.recordStudentAnswerAsync(auth, studentAnswerMatch.id, {
           answer: body?.answer,
           skipAnalysis: body?.skipAnalysis,
         }),
@@ -405,14 +498,16 @@ export function createLearningLoopServer(
     }
     const mistakeCreateMatch = match(route, "/questions/:id/mistake");
     if (method === "POST" && mistakeCreateMatch) {
-      return send(
+      return sendIdempotent(
+        request,
         response,
-        200,
-        await learningLoop.saveMistake(auth, mistakeCreateMatch.id, {
-          primaryKnowledgePoint: String(body?.primaryKnowledgePoint ?? ""),
-          secondaryKnowledgePoints: body?.secondaryKnowledgePoints,
-          mistakeCause: body?.mistakeCause,
-        }),
+        auth,
+        `create-mistake:${mistakeCreateMatch.id}`,
+        () => learningLoop.saveMistakeAsync(auth, mistakeCreateMatch.id, {
+            primaryKnowledgePoint: String(body?.primaryKnowledgePoint ?? ""),
+            secondaryKnowledgePoints: body?.secondaryKnowledgePoints,
+            mistakeCause: body?.mistakeCause,
+          }),
       );
     }
 
@@ -421,7 +516,7 @@ export function createLearningLoopServer(
       return send(
         response,
         200,
-        await learningLoop.updateMistakeCause(
+        await learningLoop.updateMistakeCauseAsync(
           auth,
           mistakeMatch.id,
           String(body?.mistakeCause ?? ""),
@@ -429,23 +524,53 @@ export function createLearningLoopServer(
       );
     }
     if (method === "DELETE" && mistakeMatch) {
-      await learningLoop.deleteMistake(auth, mistakeMatch.id);
+      await learningLoop.deleteMistakeAsync(auth, mistakeMatch.id);
       return send(response, 200, { ok: true });
     }
 
     const reviewCompleteMatch = match(route, "/reviews/:id/complete");
     if (method === "POST" && reviewCompleteMatch) {
-      return send(
+      return sendIdempotent(
+        request,
         response,
-        200,
-        await learningLoop.completeReview(auth, reviewCompleteMatch.id, {
-          selfAssessment: body?.selfAssessment,
-          variantCorrect: body?.variantCorrect ?? null,
-        }),
+        auth,
+        `complete-review:${reviewCompleteMatch.id}`,
+        () => learningLoop.completeReviewAsync(auth, reviewCompleteMatch.id, {
+            selfAssessment: body?.selfAssessment,
+            variantCorrect: body?.variantCorrect ?? null,
+          }),
       );
     }
 
     await send(response, 404, { error: "Not found." });
+  }
+
+  async function sendIdempotent(
+    request: IncomingMessage,
+    response: ServerResponse,
+    parentAccountId: string,
+    operation: string,
+    produce: () => Promise<unknown>,
+  ): Promise<void> {
+    const keyHeader = request.headers["idempotency-key"];
+    const key = Array.isArray(keyHeader) ? keyHeader[0] : keyHeader;
+    if (!key) return send(response, 200, await produce());
+    if (key.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(key)) {
+      return send(response, 400, { error: "Invalid Idempotency-Key." });
+    }
+    const claim = await idempotencyStore.claim(parentAccountId, operation, key);
+    if (claim.state === "completed") return send(response, 200, claim.response);
+    if (claim.state === "pending") {
+      return send(response, 409, { error: "idempotency_request_in_progress" });
+    }
+    try {
+      const result = await produce();
+      await idempotencyStore.complete(parentAccountId, operation, key, result);
+      return send(response, 200, result);
+    } catch (error) {
+      await idempotencyStore.release(parentAccountId, operation, key);
+      throw error;
+    }
   }
 }
 

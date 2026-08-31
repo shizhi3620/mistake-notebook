@@ -8,13 +8,13 @@ import Database from "better-sqlite3";
 import { LearningLoop } from "../src/learning-loop.ts";
 import { SqliteLearningLoopStore } from "../src/sqlite-learning-loop-store.ts";
 
-test("a guardian must confirm guardianship before creating a child profile", () => {
+test("a guardian must confirm guardianship before creating a child profile", async () => {
   const learningLoop = new LearningLoop();
-  const account = learningLoop.startWeChatLogin("test-wechat-code").account;
+  const account = (await learningLoop.startWeChatLoginAsync("test-wechat-code")).account;
 
-  assert.throws(
+  await assert.rejects(
     () =>
-      learningLoop.createChildProfile(account.id, {
+      learningLoop.createChildProfileAsync(account.id, {
         nickname: "小明",
         grade: 3,
         region: "浙江",
@@ -23,13 +23,13 @@ test("a guardian must confirm guardianship before creating a child profile", () 
   );
 });
 
-test("a confirmed guardian can create a minimal child profile", () => {
+test("a confirmed guardian can create a minimal child profile", async () => {
   const learningLoop = new LearningLoop();
-  const account = learningLoop.startWeChatLogin("test-wechat-code").account;
+  const account = (await learningLoop.startWeChatLoginAsync("test-wechat-code")).account;
 
-  learningLoop.confirmGuardianship(account.id);
+  await learningLoop.confirmGuardianshipAsync(account.id);
 
-  const child = learningLoop.createChildProfile(account.id, {
+  const child = await learningLoop.createChildProfileAsync(account.id, {
     nickname: "小明",
     grade: 3,
     location: {
@@ -61,14 +61,14 @@ test("a confirmed guardian can create a minimal child profile", () => {
   );
 });
 
-test("a selected child profile is restored only for its guardian", () => {
+test("a selected child profile is restored only for its guardian", async () => {
   const databasePath = join(mkdtempSync(join(tmpdir(), "mistake-notebook-")), "learning.db");
   const firstStore = new SqliteLearningLoopStore(databasePath);
   const firstLearningLoop = new LearningLoop(firstStore);
-  const guardian = firstLearningLoop.startWeChatLogin("guardian-code").account;
+  const guardian = (await firstLearningLoop.startWeChatLoginAsync("guardian-code")).account;
 
-  firstLearningLoop.confirmGuardianship(guardian.id);
-  const child = firstLearningLoop.createChildProfile(guardian.id, {
+  await firstLearningLoop.confirmGuardianshipAsync(guardian.id);
+  const child = await firstLearningLoop.createChildProfileAsync(guardian.id, {
     nickname: "小明",
     grade: 3,
     region: "浙江",
@@ -78,9 +78,9 @@ test("a selected child profile is restored only for its guardian", () => {
   const restoredStore = new SqliteLearningLoopStore(databasePath);
   const restoredLearningLoop = new LearningLoop(restoredStore);
 
-  assert.deepEqual(restoredLearningLoop.getSelectedChildProfile(guardian.id), child);
-  assert.throws(
-    () => restoredLearningLoop.getSelectedChildProfile("parent-without-access"),
+  assert.deepEqual(await restoredLearningLoop.getSelectedChildProfileAsync(guardian.id), child);
+  await assert.rejects(
+    () => restoredLearningLoop.getSelectedChildProfileAsync("parent-without-access"),
     /parent account was not found/i,
   );
   restoredStore.close();
@@ -135,26 +135,26 @@ test("SQLite keeps legacy regions pending and persists selected province/city", 
   store.close();
 });
 
-test("a guardian can edit and switch only their own child profiles", () => {
+test("a guardian can edit and switch only their own child profiles", async () => {
   const learningLoop = new LearningLoop();
-  const guardian = learningLoop.startWeChatLogin("guardian-code").account;
-  const otherGuardian = learningLoop.startWeChatLogin("other-guardian-code").account;
+  const guardian = (await learningLoop.startWeChatLoginAsync("guardian-code")).account;
+  const otherGuardian = (await learningLoop.startWeChatLoginAsync("other-guardian-code")).account;
 
-  learningLoop.confirmGuardianship(guardian.id);
-  learningLoop.confirmGuardianship(otherGuardian.id);
-  const firstChild = learningLoop.createChildProfile(guardian.id, {
+  await learningLoop.confirmGuardianshipAsync(guardian.id);
+  await learningLoop.confirmGuardianshipAsync(otherGuardian.id);
+  const firstChild = await learningLoop.createChildProfileAsync(guardian.id, {
     nickname: "小明",
     grade: 3,
     region: "浙江",
   });
-  const secondChild = learningLoop.createChildProfile(guardian.id, {
+  const secondChild = await learningLoop.createChildProfileAsync(guardian.id, {
     nickname: "小红",
     grade: 6,
     region: "上海",
   });
 
   assert.deepEqual(
-    learningLoop.updateChildProfile(guardian.id, firstChild.id, {
+    await learningLoop.updateChildProfileAsync(guardian.id, firstChild.id, {
       nickname: "小明同学",
       grade: 4,
       region: "浙江",
@@ -166,46 +166,46 @@ test("a guardian can edit and switch only their own child profiles", () => {
     },
   );
 
-  learningLoop.selectChildProfile(guardian.id, secondChild.id);
-  assert.deepEqual(learningLoop.getSelectedChildProfile(guardian.id), secondChild);
-  assert.throws(
-    () => learningLoop.selectChildProfile(otherGuardian.id, secondChild.id),
+  await learningLoop.selectChildProfileAsync(guardian.id, secondChild.id);
+  assert.deepEqual(await learningLoop.getSelectedChildProfileAsync(guardian.id), secondChild);
+  await assert.rejects(
+    () => learningLoop.selectChildProfileAsync(otherGuardian.id, secondChild.id),
     /not available to this guardian/i,
   );
 });
 
-test("child profiles require a nickname and valid grade, with optional province", () => {
+test("child profiles require a nickname and valid grade, with optional province", async () => {
   const learningLoop = new LearningLoop();
-  const guardian = learningLoop.startWeChatLogin("guardian-code").account;
+  const guardian = (await learningLoop.startWeChatLoginAsync("guardian-code")).account;
 
-  learningLoop.confirmGuardianship(guardian.id);
+  await learningLoop.confirmGuardianshipAsync(guardian.id);
 
-  assert.throws(
+  await assert.rejects(
     () =>
-      learningLoop.createChildProfile(guardian.id, {
+      learningLoop.createChildProfileAsync(guardian.id, {
         nickname: "",
         grade: 3,
         region: "浙江",
       }),
     /nickname/i,
   );
-  assert.throws(
+  await assert.rejects(
     () =>
-      learningLoop.createChildProfile(guardian.id, {
+      learningLoop.createChildProfileAsync(guardian.id, {
         nickname: "小明",
         grade: 10,
         region: "浙江",
       }),
     /grade/i,
   );
-  const withoutProvince = learningLoop.createChildProfile(guardian.id, {
+  const withoutProvince = await learningLoop.createChildProfileAsync(guardian.id, {
     nickname: "小明",
     grade: 3,
   });
   assert.equal(withoutProvince.region, undefined);
-  assert.throws(
+  await assert.rejects(
     () =>
-      learningLoop.createChildProfile(guardian.id, {
+      learningLoop.createChildProfileAsync(guardian.id, {
         nickname: "小红",
         grade: 3,
         location: { provinceCode: "bad", provinceName: "浙江省" },
@@ -214,54 +214,54 @@ test("child profiles require a nickname and valid grade, with optional province"
   );
 });
 
-test("login issues an expiring session without exposing the WeChat credential", () => {
+test("login issues an expiring session without exposing the WeChat credential", async () => {
   const learningLoop = new LearningLoop();
-  const login = learningLoop.startWeChatLogin("secret-wechat-code");
+  const login = await learningLoop.startWeChatLoginAsync("secret-wechat-code");
 
   assert.match(login.session.token, /^[0-9a-f-]{36}$/i);
   assert.ok(login.session.expiresAt > Date.now());
   assert.equal(JSON.stringify(login).includes("secret-wechat-code"), false);
 
-  assert.deepEqual(learningLoop.resumeSession(login.session.token), login.account);
+  assert.deepEqual(await learningLoop.resumeSessionAsync(login.session.token), login.account);
 });
 
-test("a WeChat identity restores its persisted guardian account", () => {
+test("a WeChat identity restores its persisted guardian account", async () => {
   const learningLoop = new LearningLoop();
-  const firstLogin = learningLoop.startWeChatLogin("openid-guardian");
-  learningLoop.confirmGuardianship(firstLogin.account.id);
+  const firstLogin = await learningLoop.startWeChatLoginAsync("openid-guardian");
+  await learningLoop.confirmGuardianshipAsync(firstLogin.account.id);
 
-  const secondLogin = learningLoop.startWeChatLogin("openid-guardian");
+  const secondLogin = await learningLoop.startWeChatLoginAsync("openid-guardian");
 
   assert.equal(secondLogin.account.id, firstLogin.account.id);
   assert.equal(secondLogin.account.guardianshipConfirmed, true);
   assert.notEqual(secondLogin.session.token, firstLogin.session.token);
 });
 
-test("deleting a guardian releases its WeChat identity", () => {
+test("deleting a guardian releases its WeChat identity", async () => {
   const learningLoop = new LearningLoop();
-  const firstLogin = learningLoop.startWeChatLogin("openid-deleted-guardian");
+  const firstLogin = await learningLoop.startWeChatLoginAsync("openid-deleted-guardian");
 
-  learningLoop.deleteParentAccount(firstLogin.account.id);
-  const secondLogin = learningLoop.startWeChatLogin("openid-deleted-guardian");
+  await learningLoop.deleteParentAccountAsync(firstLogin.account.id);
+  const secondLogin = await learningLoop.startWeChatLoginAsync("openid-deleted-guardian");
 
   assert.notEqual(secondLogin.account.id, firstLogin.account.id);
 });
 
-test("an expired or unknown session asks the guardian to log in again", () => {
+test("an expired or unknown session asks the guardian to log in again", async () => {
   let now = 1_000_000;
   const learningLoop = new LearningLoop(undefined, { now: () => now });
-  const login = learningLoop.startWeChatLogin("wechat-code");
+  const login = await learningLoop.startWeChatLoginAsync("wechat-code");
 
-  assert.deepEqual(learningLoop.resumeSession(login.session.token), login.account);
+  assert.deepEqual(await learningLoop.resumeSessionAsync(login.session.token), login.account);
 
   now += 100 * 24 * 60 * 60 * 1000;
 
-  assert.throws(
-    () => learningLoop.resumeSession(login.session.token),
+  await assert.rejects(
+    () => learningLoop.resumeSessionAsync(login.session.token),
     /log in again/i,
   );
-  assert.throws(
-    () => learningLoop.resumeSession("no-such-token"),
+  await assert.rejects(
+    () => learningLoop.resumeSessionAsync("no-such-token"),
     /log in again/i,
   );
 });

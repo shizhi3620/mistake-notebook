@@ -8,40 +8,27 @@ import {
   type ParentAccount,
 } from "../src/learning-loop.ts";
 
-function confirmedGuardianWithChild(learningLoop: LearningLoop): {
-  guardian: ParentAccount;
-  child: ChildProfile;
-} {
-  const guardian = learningLoop.startWeChatLogin("guardian-code").account;
-  learningLoop.confirmGuardianship(guardian.id);
-  const child = learningLoop.createChildProfile(guardian.id, {
-    nickname: "小明",
-    grade: 3,
-    region: "浙江",
-  });
+async function confirmedGuardianWithChildAsync(learningLoop: LearningLoop) {
+  const guardian = (await learningLoop.startWeChatLoginAsync("guardian-code")).account;
+  await learningLoop.confirmGuardianshipAsync(guardian.id);
+  const child = await learningLoop.createChildProfileAsync(guardian.id, { nickname: "小明", grade: 3, region: "浙江" });
   return { guardian, child };
 }
 
-function saveMistake(
-  learningLoop: LearningLoop,
-  guardian: ParentAccount,
-  child: ChildProfile,
-  stem = "3 + 5 = ?",
-  details = { primaryKnowledgePoint: "20以内进位加法" },
-): MistakeRecord {
-  const draft = learningLoop.startQuestionDraft(guardian.id, child.id, "manual");
-  const question = learningLoop.confirmQuestion(guardian.id, draft.id, { stem });
-  return learningLoop.saveMistake(guardian.id, question.id, details);
+async function saveMistakeAsync(learningLoop: LearningLoop, guardian: ParentAccount, child: ChildProfile, stem = "3 + 5 = ?", details = { primaryKnowledgePoint: "20以内进位加法" }): Promise<MistakeRecord> {
+  const draft = await learningLoop.startQuestionDraftAsync(guardian.id, child.id, "manual");
+  const question = await learningLoop.confirmQuestionAsync(guardian.id, draft.id, { stem });
+  return learningLoop.saveMistakeAsync(guardian.id, question.id, details);
 }
 
-test("a saved mistake is scheduled on the Ebbinghaus rhythm in the Asia/Shanghai calendar", () => {
+test("a saved mistake is scheduled on the Ebbinghaus rhythm in the Asia/Shanghai calendar", async () => {
   // 2026-08-26 17:00 UTC is already 2026-08-27 01:00 in Shanghai.
   let now = Date.parse("2026-08-26T17:00:00Z");
   const learningLoop = new LearningLoop(undefined, { now: () => now });
-  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
+  const { guardian, child } = await confirmedGuardianWithChildAsync(learningLoop);
 
-  const mistake = saveMistake(learningLoop, guardian, child);
-  const schedule = learningLoop.getReviewSchedule(guardian.id, mistake.id);
+  const mistake = await saveMistakeAsync(learningLoop, guardian, child);
+  const schedule = await learningLoop.getReviewScheduleAsync(guardian.id, mistake.id);
 
   assert.equal(schedule.intervalDays, 1);
   assert.equal(
@@ -54,10 +41,10 @@ test("a saved mistake is scheduled on the Ebbinghaus rhythm in the Asia/Shanghai
   assert.match(schedule.masteryNote, /学习记录指标/);
   assert.match(schedule.masteryNote, /并非考试评价/);
 
-  assert.deepEqual(learningLoop.getDueReviews(guardian.id, child.id), []);
+  assert.deepEqual(await learningLoop.getDueReviewsAsync(guardian.id, child.id), []);
 
   now = Date.parse("2026-08-28T00:30:00+08:00");
-  const due = learningLoop.getDueReviews(guardian.id, child.id);
+  const due = await learningLoop.getDueReviewsAsync(guardian.id, child.id);
   assert.equal(due.length, 1);
   assert.equal(due[0]?.id, mistake.id);
   assert.equal(due[0]?.stem, "3 + 5 = ?");
@@ -66,14 +53,14 @@ test("a saved mistake is scheduled on the Ebbinghaus rhythm in the Asia/Shanghai
 test("a review recalls the knowledge point, adapts the interval, and ignores duplicate submissions", async () => {
   let now = Date.parse("2026-08-27T09:00:00+08:00");
   const learningLoop = new LearningLoop(undefined, { now: () => now });
-  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
-  const mistake = saveMistake(learningLoop, guardian, child);
+  const { guardian, child } = await confirmedGuardianWithChildAsync(learningLoop);
+  const mistake = await saveMistakeAsync(learningLoop, guardian, child);
 
-  const session = await learningLoop.startReview(guardian.id, mistake.id);
+  const session = await learningLoop.startReviewAsync(guardian.id, mistake.id);
   assert.match(session.recallPrompt, /20以内进位加法/);
   assert.deepEqual(session.exercise, { kind: "original", stem: "3 + 5 = ?" });
 
-  const result = learningLoop.completeReview(guardian.id, session.reviewId, {
+  const result = await learningLoop.completeReviewAsync(guardian.id, session.reviewId, {
     selfAssessment: "mastered",
     variantCorrect: null,
   });
@@ -87,7 +74,7 @@ test("a review recalls the knowledge point, adapts the interval, and ignores dup
   assert.equal(result.masteryScore, 0.34);
   assert.equal(result.masteryStatus, "learning");
 
-  const replay = learningLoop.completeReview(guardian.id, session.reviewId, {
+  const replay = await learningLoop.completeReviewAsync(guardian.id, session.reviewId, {
     selfAssessment: "not-yet",
     variantCorrect: false,
   });
@@ -96,12 +83,12 @@ test("a review recalls the knowledge point, adapts the interval, and ignores dup
   assert.equal(replay.masteryScore, 0.34);
   assert.equal(replay.intervalDays, 2);
   assert.equal(
-    learningLoop.getReviewSchedule(guardian.id, mistake.id).reviewCount,
+    (await learningLoop.getReviewScheduleAsync(guardian.id, mistake.id)).reviewCount,
     1,
   );
 
   assert.equal(
-    learningLoop.listMistakes(guardian.id, child.id)[0]?.masteryStatus,
+    (await learningLoop.listMistakesAsync(guardian.id, child.id))[0]?.masteryStatus,
     "learning",
   );
 });
@@ -109,15 +96,15 @@ test("a review recalls the knowledge point, adapts the interval, and ignores dup
 test("intervals reset on forgotten reviews, step back on wrong variants, and mastery accumulates", async () => {
   let now = Date.parse("2026-08-27T09:00:00+08:00");
   const learningLoop = new LearningLoop(undefined, { now: () => now });
-  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
-  const mistake = saveMistake(learningLoop, guardian, child);
+  const { guardian, child } = await confirmedGuardianWithChildAsync(learningLoop);
+  const mistake = await saveMistakeAsync(learningLoop, guardian, child);
 
   const review = async (
     selfAssessment: "not-yet" | "partially" | "mastered",
     variantCorrect: boolean | null,
   ) => {
-    const session = await learningLoop.startReview(guardian.id, mistake.id);
-    return learningLoop.completeReview(guardian.id, session.reviewId, {
+    const session = await learningLoop.startReviewAsync(guardian.id, mistake.id);
+    return learningLoop.completeReviewAsync(guardian.id, session.reviewId, {
       selfAssessment,
       variantCorrect,
     });
@@ -144,7 +131,7 @@ test("intervals reset on forgotten reviews, step back on wrong variants, and mas
   now = result.nextReviewAt + 60_000;
 
   assert.equal(
-    learningLoop.listMistakes(guardian.id, child.id)[0]?.masteryStatus,
+    (await learningLoop.listMistakesAsync(guardian.id, child.id))[0]?.masteryStatus,
     "mastered",
   );
 
@@ -163,30 +150,30 @@ test("a review can exercise a same-type variant generated for the child's grade"
       variantExercise: { stem: "4 + 5 = ?", answer: "9" },
     }),
   });
-  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
-  const mistake = saveMistake(learningLoop, guardian, child);
+  const { guardian, child } = await confirmedGuardianWithChildAsync(learningLoop);
+  const mistake = await saveMistakeAsync(learningLoop, guardian, child);
 
-  const session = await learningLoop.startReview(guardian.id, mistake.id, {
+  const session = await learningLoop.startReviewAsync(guardian.id, mistake.id, {
     exercise: "variant",
   });
 
   assert.deepEqual(session.exercise, { kind: "variant", stem: "4 + 5 = ?" });
 
-  const result = learningLoop.completeReview(guardian.id, session.reviewId, {
+  const result = await learningLoop.completeReviewAsync(guardian.id, session.reviewId, {
     selfAssessment: "mastered",
     variantCorrect: true,
   });
   assert.equal(result.masteryScore, 0.39);
 
   const withoutProvider = new LearningLoop();
-  const second = confirmedGuardianWithChild(withoutProvider);
-  const secondMistake = saveMistake(
+  const second = await confirmedGuardianWithChildAsync(withoutProvider);
+  const secondMistake = await saveMistakeAsync(
     withoutProvider,
     second.guardian,
     second.child,
   );
   await assert.rejects(
-    withoutProvider.startReview(second.guardian.id, secondMistake.id, {
+    withoutProvider.startReviewAsync(second.guardian.id, secondMistake.id, {
       exercise: "variant",
     }),
     /explanation provider/i,

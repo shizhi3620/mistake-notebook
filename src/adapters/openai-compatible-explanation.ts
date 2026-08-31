@@ -9,6 +9,7 @@ export type OpenAiCompatibleAdapterOptions = {
   model: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  maxRetries?: number;
 };
 
 const GRADE_NAMES = [
@@ -41,6 +42,7 @@ export function createOpenAiCompatibleExplanationProvider(
   const fetchImpl = options.fetchImpl ?? fetch;
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
   const timeoutMs = options.timeoutMs ?? 30_000;
+  const maxRetries = Math.max(0, Math.min(3, options.maxRetries ?? 2));
 
   return async (request) => {
     const gradeName = GRADE_NAMES[request.grade - 1] ?? `${request.grade} 年级`;
@@ -50,34 +52,21 @@ export function createOpenAiCompatibleExplanationProvider(
         ? `学生作答：${request.studentAnswer}。请指出可能的错误步骤。`
         : "学生未提供作答。";
 
-    const response = await fetchImpl(`${baseUrl}/v1/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${options.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: options.model,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          {
-            role: "user",
-            content: [
-              `学生年级：${gradeName}。`,
-              `题目：${request.stem}`,
-              request.formulas.length > 0
-                ? `识别出的公式：${request.formulas.join("；")}。`
-                : "",
-              studentAnswerPart,
-            ]
-              .filter(Boolean)
-              .join("\n"),
-          },
-        ],
-      }),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    let response: Response | undefined;
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      try {
+        response = await fetchImpl(`${baseUrl}/v1/chat/completions`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${options.apiKey}` },
+          body: JSON.stringify({ model: options.model, response_format: { type: "json_object" }, messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: [`学生年级：${gradeName}。`, `题目：${request.stem}`, request.formulas.length > 0 ? `识别出的公式：${request.formulas.join("；")}。` : "", studentAnswerPart].filter(Boolean).join("\n") }] }),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (response.ok || response.status < 500 || attempt === maxRetries) break;
+      } catch (error) {
+        if (attempt === maxRetries) throw new Error(`Explanation request unavailable after ${attempt + 1} attempts: ${error instanceof Error ? error.message : "unknown error"}`);
+      }
+    }
+    if (!response) throw new Error("Explanation request unavailable.");
 
     if (!response.ok) {
       throw new Error(

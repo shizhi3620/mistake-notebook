@@ -1166,6 +1166,17 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
       : undefined;
   }
 
+  findWeChatSubject(parentAccountId: string): string | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT wechat_subject
+         FROM wechat_identities
+         WHERE parent_account_id = ?`,
+      )
+      .get(parentAccountId) as { wechat_subject: string } | undefined;
+    return row?.wechat_subject;
+  }
+
   saveWeChatSubject(parentAccountId: string, weChatSubject: string): void {
     this.database
       .prepare(

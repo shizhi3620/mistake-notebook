@@ -9,13 +9,13 @@ import {
   type ChildProfile,
 } from "../src/learning-loop.ts";
 
-function confirmedGuardianWithChild(learningLoop: LearningLoop): {
+async function confirmedGuardianWithChild(learningLoop: LearningLoop): Promise<{
   guardian: ParentAccount;
   child: ChildProfile;
-} {
-  const guardian = learningLoop.startWeChatLogin("guardian-code").account;
-  learningLoop.confirmGuardianship(guardian.id);
-  const child = learningLoop.createChildProfile(guardian.id, {
+}> {
+  const guardian = (await learningLoop.startWeChatLoginAsync("guardian-code")).account;
+  await learningLoop.confirmGuardianshipAsync(guardian.id);
+  const child = await learningLoop.createChildProfileAsync(guardian.id, {
     nickname: "小明",
     grade: 3,
     region: "浙江",
@@ -23,14 +23,14 @@ function confirmedGuardianWithChild(learningLoop: LearningLoop): {
   return { guardian, child };
 }
 
-function captureConfirmedQuestion(
+async function captureConfirmedQuestion(
   learningLoop: LearningLoop,
   guardian: ParentAccount,
   child: ChildProfile,
   stem = "3 + 5 = ?",
-): ConfirmedQuestion {
-  const draft = learningLoop.startQuestionDraft(guardian.id, child.id, "manual");
-  return learningLoop.confirmQuestion(guardian.id, draft.id, { stem });
+): Promise<ConfirmedQuestion> {
+  const draft = await learningLoop.startQuestionDraftAsync(guardian.id, child.id, "manual");
+  return learningLoop.confirmQuestionAsync(guardian.id, draft.id, { stem });
 }
 
 const explanationContent = {
@@ -52,8 +52,8 @@ test("the explanation unfolds hint-first and hides the final answer unless the g
       return explanationContent;
     },
   });
-  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
-  const question = captureConfirmedQuestion(learningLoop, guardian, child);
+  const { guardian, child } = await confirmedGuardianWithChild(learningLoop);
+  const question = await captureConfirmedQuestion(learningLoop, guardian, child);
 
   const folded = await learningLoop.getExplanation(guardian.id, question.id);
   assert.equal(folded.hint, explanationContent.hint);
@@ -72,7 +72,7 @@ test("the explanation unfolds hint-first and hides the final answer unless the g
   });
   assert.equal(stillFolded.finalAnswer, null);
 
-  learningLoop.setAnswerRevealPreference(guardian.id, true);
+  await learningLoop.setAnswerRevealPreferenceAsync(guardian.id, true);
   const revealed = await learningLoop.getExplanation(guardian.id, question.id, {
     revealAnswer: true,
   });
@@ -89,10 +89,10 @@ test("a student answer can be attached later and unclear handwriting skips answe
       return explanationContent;
     },
   });
-  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
-  const question = captureConfirmedQuestion(learningLoop, guardian, child);
+  const { guardian, child } = await confirmedGuardianWithChild(learningLoop);
+  const question = await captureConfirmedQuestion(learningLoop, guardian, child);
 
-  const withAnswer = learningLoop.recordStudentAnswer(guardian.id, question.id, {
+  const withAnswer = await learningLoop.recordStudentAnswerAsync(guardian.id, question.id, {
     answer: "7",
   });
   assert.equal(withAnswer.studentAnswer, "7");
@@ -102,7 +102,7 @@ test("a student answer can be attached later and unclear handwriting skips answe
   assert.equal(requests.at(-1)?.studentAnswer, "7");
   assert.equal(requests.at(-1)?.skipAnswerAnalysis, false);
 
-  const skipped = learningLoop.recordStudentAnswer(guardian.id, question.id, {
+  const skipped = await learningLoop.recordStudentAnswerAsync(guardian.id, question.id, {
     skipAnalysis: true,
   });
   assert.equal(skipped.studentAnswer, null);
@@ -112,22 +112,21 @@ test("a student answer can be attached later and unclear handwriting skips answe
   assert.equal(requests.at(-1)?.studentAnswer, null);
   assert.equal(requests.at(-1)?.skipAnswerAnalysis, true);
 
-  const otherGuardian = learningLoop.startWeChatLogin("other-code").account;
-  learningLoop.confirmGuardianship(otherGuardian.id);
-  assert.throws(
-    () =>
-      learningLoop.recordStudentAnswer(otherGuardian.id, question.id, {
+  const otherGuardian = (await learningLoop.startWeChatLoginAsync("other-code")).account;
+  await learningLoop.confirmGuardianshipAsync(otherGuardian.id);
+  await assert.rejects(
+      learningLoop.recordStudentAnswerAsync(otherGuardian.id, question.id, {
         answer: "8",
       }),
     /not available to this guardian/i,
   );
 });
 
-test("a confirmed question uses recognized handwriting until a guardian edits it", () => {
+test("a confirmed question uses recognized handwriting until a guardian edits it", async () => {
   const learningLoop = new LearningLoop();
-  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
-  const draft = learningLoop.startQuestionDraft(guardian.id, child.id, "camera");
-  learningLoop.recordQuestionRecognition(guardian.id, draft.id, {
+  const { guardian, child } = await confirmedGuardianWithChild(learningLoop);
+  const draft = await learningLoop.startQuestionDraftAsync(guardian.id, child.id, "camera");
+  await learningLoop.recordQuestionRecognitionAsync(guardian.id, draft.id, {
     stem: "3 + 5 = ?",
     formulas: ["3 + 5"],
     region: null,
@@ -136,18 +135,18 @@ test("a confirmed question uses recognized handwriting until a guardian edits it
     studentAnswerConfidence: 0.42,
   });
 
-  const question = learningLoop.confirmQuestion(guardian.id, draft.id, {
+  const question = await learningLoop.confirmQuestionAsync(guardian.id, draft.id, {
     stem: "3 + 5 = ?",
   });
   assert.equal(question.studentAnswer, "7");
 });
 
-test("a saved mistake carries one primary knowledge point, up to two secondary, and an editable cause", () => {
+test("a saved mistake carries one primary knowledge point, up to two secondary, and an editable cause", async () => {
   const learningLoop = new LearningLoop();
-  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
-  const question = captureConfirmedQuestion(learningLoop, guardian, child);
+  const { guardian, child } = await confirmedGuardianWithChild(learningLoop);
+  const question = await captureConfirmedQuestion(learningLoop, guardian, child);
 
-  const mistake = learningLoop.saveMistake(guardian.id, question.id, {
+  const mistake = await learningLoop.saveMistakeAsync(guardian.id, question.id, {
     primaryKnowledgePoint: "20以内进位加法",
     secondaryKnowledgePoints: ["数的组成", "凑十法"],
     mistakeCause: "把加法看成减法",
@@ -159,41 +158,35 @@ test("a saved mistake carries one primary knowledge point, up to two secondary, 
   assert.deepEqual(mistake.secondaryKnowledgePoints, ["数的组成", "凑十法"]);
   assert.equal(mistake.mistakeCause, "把加法看成减法");
 
-  const updated = learningLoop.updateMistakeCause(
+  const updated = await learningLoop.updateMistakeCauseAsync(
     guardian.id,
     mistake.id,
     "粗心抄错数字",
   );
   assert.equal(updated.mistakeCause, "粗心抄错数字");
 
-  assert.throws(
-    () =>
-      learningLoop.saveMistake(guardian.id, question.id, {
+  await assert.rejects(
+      learningLoop.saveMistakeAsync(guardian.id, question.id, {
         primaryKnowledgePoint: "  ",
       }),
     /primary knowledge point/i,
   );
-  assert.throws(
-    () =>
-      learningLoop.saveMistake(guardian.id, question.id, {
+  await assert.rejects(
+      learningLoop.saveMistakeAsync(guardian.id, question.id, {
         primaryKnowledgePoint: "加法",
         secondaryKnowledgePoints: ["一", "二", "三"],
       }),
     /at most two/i,
   );
-  assert.throws(
-    () =>
-      learningLoop.saveMistake(guardian.id, question.id, {
-        primaryKnowledgePoint: "加法",
-      }),
-    /already saved/i,
-  );
+  const replay = await learningLoop.saveMistakeAsync(guardian.id, question.id, {
+    primaryKnowledgePoint: "加法",
+  });
+  assert.equal(replay.id, mistake.id);
 
-  const otherGuardian = learningLoop.startWeChatLogin("other-code").account;
-  learningLoop.confirmGuardianship(otherGuardian.id);
-  assert.throws(
-    () =>
-      learningLoop.updateMistakeCause(otherGuardian.id, mistake.id, "x"),
+  const otherGuardian = (await learningLoop.startWeChatLoginAsync("other-code")).account;
+  await learningLoop.confirmGuardianshipAsync(otherGuardian.id);
+  await assert.rejects(
+      learningLoop.updateMistakeCauseAsync(otherGuardian.id, mistake.id, "x"),
     /not available to this guardian/i,
   );
 });
@@ -202,16 +195,16 @@ test("an unreliable question cannot be explained or saved as a mistake", async (
   const learningLoop = new LearningLoop(undefined, {
     explanationProvider: () => explanationContent,
   });
-  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
+  const { guardian, child } = await confirmedGuardianWithChild(learningLoop);
 
-  const draft = learningLoop.startQuestionDraft(guardian.id, child.id, "camera");
-  learningLoop.recordQuestionRecognition(guardian.id, draft.id, {
+  const draft = await learningLoop.startQuestionDraftAsync(guardian.id, child.id, "camera");
+  await learningLoop.recordQuestionRecognitionAsync(guardian.id, draft.id, {
     stem: "3 + S = ?",
     formulas: [],
     region: null,
     confidence: 0.3,
   });
-  const pending = learningLoop.confirmQuestion(guardian.id, draft.id, {
+  const pending = await learningLoop.confirmQuestionAsync(guardian.id, draft.id, {
     stem: "3 + S = ?",
   });
   assert.equal(pending.status, "pending-confirmation");
@@ -220,9 +213,8 @@ test("an unreliable question cannot be explained or saved as a mistake", async (
     learningLoop.getExplanation(guardian.id, pending.id),
     /reliable/i,
   );
-  assert.throws(
-    () =>
-      learningLoop.saveMistake(guardian.id, pending.id, {
+  await assert.rejects(
+      learningLoop.saveMistakeAsync(guardian.id, pending.id, {
         primaryKnowledgePoint: "加法",
       }),
     /reliable/i,

@@ -1,4 +1,7 @@
-const { apiBaseByEnvironment } = require("./config.private");
+const {
+  apiBaseByEnvironment,
+  reminderTemplateIdByEnvironment = {},
+} = require("./config.private");
 
 const environment = wx.getAccountInfoSync().miniProgram.envVersion || "develop";
 const apiBase = apiBaseByEnvironment[environment];
@@ -10,4 +13,5 @@ if (typeof apiBase !== "string" || !apiBase.startsWith("https://")) {
 module.exports = {
   cloudEnv: "prod-d8giqy4sjc5925f68",
   apiBase,
+  reminderTemplateId: reminderTemplateIdByEnvironment[environment] || "",
 };

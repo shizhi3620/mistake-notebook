@@ -9,14 +9,14 @@ import {
   type ReviewSelfAssessment,
 } from "../src/learning-loop.ts";
 
-function confirmedGuardianWithChild(
+async function confirmedGuardianWithChild(
   learningLoop: LearningLoop,
   nickname = "小明",
-): { guardian: ParentAccount; child: ChildProfile } {
-  const guardian = learningLoop.startWeChatLogin("guardian-code").account;
-  learningLoop.confirmGuardianship(guardian.id);
-  learningLoop.grantSubscription(guardian.id, "subscriber");
-  const child = learningLoop.createChildProfile(guardian.id, {
+): Promise<{ guardian: ParentAccount; child: ChildProfile }> {
+  const guardian = (await learningLoop.startWeChatLoginAsync("guardian-code")).account;
+  await learningLoop.confirmGuardianshipAsync(guardian.id);
+  await learningLoop.grantSubscriptionAsync(guardian.id, "subscriber");
+  const child = await learningLoop.createChildProfileAsync(guardian.id, {
     nickname,
     grade: 3,
     region: "浙江",
@@ -24,16 +24,16 @@ function confirmedGuardianWithChild(
   return { guardian, child };
 }
 
-function saveMistake(
+async function saveMistake(
   learningLoop: LearningLoop,
   guardian: ParentAccount,
   child: ChildProfile,
   stem: string,
   primaryKnowledgePoint: string,
-): MistakeRecord {
-  const draft = learningLoop.startQuestionDraft(guardian.id, child.id, "manual");
-  const question = learningLoop.confirmQuestion(guardian.id, draft.id, { stem });
-  return learningLoop.saveMistake(guardian.id, question.id, {
+): Promise<MistakeRecord> {
+  const draft = await learningLoop.startQuestionDraftAsync(guardian.id, child.id, "manual");
+  const question = await learningLoop.confirmQuestionAsync(guardian.id, draft.id, { stem });
+  return learningLoop.saveMistakeAsync(guardian.id, question.id, {
     primaryKnowledgePoint,
   });
 }
@@ -45,8 +45,8 @@ async function review(
   selfAssessment: ReviewSelfAssessment,
   variantCorrect: boolean | null,
 ): Promise<void> {
-  const session = await learningLoop.startReview(guardian.id, mistakeId);
-  learningLoop.completeReview(guardian.id, session.reviewId, {
+  const session = await learningLoop.startReviewAsync(guardian.id, mistakeId);
+  await learningLoop.completeReviewAsync(guardian.id, session.reviewId, {
     selfAssessment,
     variantCorrect,
   });
@@ -56,31 +56,31 @@ test("the weekly report ranks weaknesses by combined evidence, not raw mistake c
   // 2026-08-26 is a Wednesday; the Shanghai week starts Monday 2026-08-24.
   const now = Date.parse("2026-08-26T10:00:00+08:00");
   const learningLoop = new LearningLoop(undefined, { now: () => now });
-  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
+  const { guardian, child } = await confirmedGuardianWithChild(learningLoop);
 
-  const additionFirst = saveMistake(
+  const additionFirst = await saveMistake(
     learningLoop,
     guardian,
     child,
     "3 + 5 = ?",
     "加法",
   );
-  const additionSecond = saveMistake(
+  const additionSecond = await saveMistake(
     learningLoop,
     guardian,
     child,
     "6 + 7 = ?",
     "加法",
   );
-  const subtraction = saveMistake(
+  const subtraction = await saveMistake(
     learningLoop,
     guardian,
     child,
     "9 - 4 = ?",
     "减法",
   );
-  saveMistake(learningLoop, guardian, child, "3 × 4 = ?", "乘法");
-  saveMistake(learningLoop, guardian, child, "12 ÷ 3 = ?", "除法");
+  await saveMistake(learningLoop, guardian, child, "3 × 4 = ?", "乘法");
+  await saveMistake(learningLoop, guardian, child, "12 ÷ 3 = ?", "除法");
 
   await review(learningLoop, guardian, additionFirst.id, "mastered", true);
   await review(learningLoop, guardian, additionFirst.id, "mastered", true);
@@ -89,7 +89,7 @@ test("the weekly report ranks weaknesses by combined evidence, not raw mistake c
   await review(learningLoop, guardian, additionSecond.id, "mastered", true);
   await review(learningLoop, guardian, subtraction.id, "not-yet", false);
 
-  const report = learningLoop.getWeeklyReport(guardian.id, child.id);
+  const report = await learningLoop.getWeeklyReportAsync(guardian.id, child.id);
 
   assert.equal(report.weekStart, Date.parse("2026-08-24T00:00:00+08:00"));
   assert.equal(report.weekEnd, Date.parse("2026-08-31T00:00:00+08:00"));
@@ -117,12 +117,12 @@ test("the weekly report ranks weaknesses by combined evidence, not raw mistake c
   assert.match(report.comparisonNote, /不包含任何排名/);
 });
 
-test("an empty week is reported truthfully and comparisons never appear", () => {
+test("an empty week is reported truthfully and comparisons never appear", async () => {
   const now = Date.parse("2026-08-26T10:00:00+08:00");
   const learningLoop = new LearningLoop(undefined, { now: () => now });
-  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
+  const { guardian, child } = await confirmedGuardianWithChild(learningLoop);
 
-  const report = learningLoop.getWeeklyReport(guardian.id, child.id);
+  const report = await learningLoop.getWeeklyReportAsync(guardian.id, child.id);
 
   assert.equal(report.empty, true);
   assert.equal(report.newMistakes, 0);
@@ -134,20 +134,20 @@ test("an empty week is reported truthfully and comparisons never appear", () => 
   assert.match(report.comparisonNote, /其他孩子/);
 });
 
-test("the report only ever contains the authorized child's data", () => {
+test("the report only ever contains the authorized child's data", async () => {
   const now = Date.parse("2026-08-26T10:00:00+08:00");
   const learningLoop = new LearningLoop(undefined, { now: () => now });
-  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
-  const otherChild = learningLoop.createChildProfile(guardian.id, {
+  const { guardian, child } = await confirmedGuardianWithChild(learningLoop);
+  const otherChild = await learningLoop.createChildProfileAsync(guardian.id, {
     nickname: "小红",
     grade: 6,
     region: "上海",
   });
 
-  saveMistake(learningLoop, guardian, child, "3 + 5 = ?", "加法");
-  saveMistake(learningLoop, guardian, otherChild, "2x = 10", "简易方程");
+  await saveMistake(learningLoop, guardian, child, "3 + 5 = ?", "加法");
+  await saveMistake(learningLoop, guardian, otherChild, "2x = 10", "简易方程");
 
-  const report = learningLoop.getWeeklyReport(guardian.id, child.id);
+  const report = await learningLoop.getWeeklyReportAsync(guardian.id, child.id);
 
   assert.equal(report.newMistakes, 1);
   assert.deepEqual(
@@ -155,21 +155,21 @@ test("the report only ever contains the authorized child's data", () => {
     ["加法"],
   );
 
-  const otherGuardian = learningLoop.startWeChatLogin("other-code").account;
-  learningLoop.confirmGuardianship(otherGuardian.id);
-  assert.throws(
-    () => learningLoop.getWeeklyReport(otherGuardian.id, child.id),
+  const otherGuardian = (await learningLoop.startWeChatLoginAsync("other-code")).account;
+  await learningLoop.confirmGuardianshipAsync(otherGuardian.id);
+  await assert.rejects(
+    learningLoop.getWeeklyReportAsync(otherGuardian.id, child.id),
     /not available to this guardian/i,
   );
 });
 
-test("confirmed correct homework practice lowers the related weakness score", () => {
+test("confirmed correct homework practice lowers the related weakness score", async () => {
   const now = Date.parse("2026-08-26T10:00:00+08:00");
   const learningLoop = new LearningLoop(undefined, { now: () => now });
-  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
-  const mistake = saveMistake(learningLoop, guardian, child, "12 - 5 = ?", "退位减法");
+  const { guardian, child } = await confirmedGuardianWithChild(learningLoop);
+  const mistake = await saveMistake(learningLoop, guardian, child, "12 - 5 = ?", "退位减法");
 
-  const review = learningLoop.createHomeworkReview(guardian.id, child.id, {
+  const review = await learningLoop.createHomeworkReviewAsync(guardian.id, child.id, {
     questions: [{
       stem: "8 + 7 = ?",
       studentAnswer: "15",
@@ -184,12 +184,12 @@ test("confirmed correct homework practice lowers the related weakness score", ()
       suggestedMistakeCause: null,
     }],
   });
-  learningLoop.confirmHomeworkQuestion(guardian.id, review.id, review.candidates[0]!.id, {
+  await learningLoop.confirmHomeworkQuestionAsync(guardian.id, review.id, review.candidates[0]!.id, {
     verdict: "correct",
     primaryKnowledgePoint: "退位减法",
   });
 
-  const report = learningLoop.getWeeklyReport(guardian.id, child.id);
+  const report = await learningLoop.getWeeklyReportAsync(guardian.id, child.id);
   const entry = report.weaknesses.find((item) => item.knowledgePoint === "退位减法");
   assert.ok(entry);
   assert.equal(entry.correctPracticeCount, 1);

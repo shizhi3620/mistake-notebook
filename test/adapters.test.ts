@@ -4,6 +4,21 @@ import test from "node:test";
 import { createOpenAiCompatibleExplanationProvider } from "../src/adapters/openai-compatible-explanation.ts";
 import { createOpenAiCompatibleRecognitionClient } from "../src/adapters/openai-compatible-recognition.ts";
 import { createWeChatIdentityResolver } from "../src/adapters/wechat-login.ts";
+import { runImageCleanup, scheduleImageCleanup } from "../src/image-retention.ts";
+
+test("image retention schedules originals, crops, and drafts with retryable cleanup", async () => {
+  const original = scheduleImageCleanup({ id: "o", fileId: "cloud://o", kind: "original", createdAt: 0 });
+  const crop = scheduleImageCleanup({ id: "c", fileId: "cloud://c", kind: "crop", createdAt: 0 });
+  const draft = scheduleImageCleanup({ id: "d", fileId: "cloud://d", kind: "draft", createdAt: 0 });
+  assert.equal(original.deleteAfter, 0);
+  assert.ok(crop.deleteAfter > draft.deleteAfter);
+  let attempts = 0;
+  await runImageCleanup([original], 1, async () => { attempts += 1; throw new Error("temporary outage"); }, 2);
+  assert.equal(original.attempts, 1);
+  await runImageCleanup([original], 2, async () => { attempts += 1; }, 2);
+  assert.equal(original.deletedAt, 2);
+  assert.equal(attempts, 2);
+});
 
 type FetchCall = { url: string; init: RequestInit };
 
@@ -253,4 +268,74 @@ test("the WeChat identity resolver exchanges a temporary code without exposing s
     }) as typeof fetch,
   });
   await assert.rejects(unavailable("retry-code"), /could not be verified/i);
+});
+test("CloudBase storage deletion only accepts cloud file IDs", async () => {
+  let deleted = "";
+  const { createCloudBaseStorageVerifier } = await import("../src/adapters/cloudbase-storage.ts");
+  const storage = createCloudBaseStorageVerifier({ getTemporaryUrl: async () => "https://example.test/image", deleteFile: async (fileId) => { deleted = fileId; } });
+  await storage.deleteUploadedFile("cloud://env/path/image.jpg");
+  assert.equal(deleted, "cloud://env/path/image.jpg");
+  await assert.rejects(() => storage.deleteUploadedFile("https://example.test/image"), /invalid CloudBase file ID/);
+});
+
+test("CloudBase upload verification binds a file ID to its upload credential path", async () => {
+  const { createCloudBaseStorageVerifier } = await import("../src/adapters/cloudbase-storage.ts");
+  const storage = createCloudBaseStorageVerifier({
+    getTemporaryUrl: async () => "https://example.test/image",
+  });
+  assert.deepEqual(
+    await storage.verifyUploadedFile({
+      fileId: "cloud://prod-env/questions/draft-1/file-1",
+      expectedImageKey: "questions/draft-1/file-1",
+    }),
+    { imageUrl: "https://example.test/image" },
+  );
+  await assert.rejects(
+    storage.verifyUploadedFile({
+      fileId: "cloud://prod-env/questions/other/file-2",
+      expectedImageKey: "questions/draft-1/file-1",
+    }),
+    /does not belong/i,
+  );
+});
+
+test("WeChat reminder sender caches tokens and sends only privacy-safe template data", async () => {
+  const { createWeChatSubscriptionReminderSender } = await import("../src/adapters/wechat-subscription-reminder.ts");
+  const requests: Array<{ url: string; body?: any }> = [];
+  const sender = createWeChatSubscriptionReminderSender({
+    appId: "app-id",
+    appSecret: "app-secret",
+    templateId: "template-id",
+    nicknameField: "thing1",
+    dueCountField: "number2",
+    resolveOpenId: async () => "openid-1",
+    fetchImpl: (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (url.includes("/cgi-bin/token")) {
+        return new Response(JSON.stringify({ access_token: "token-1", expires_in: 7200 }));
+      }
+      return new Response(JSON.stringify({ errcode: 0, errmsg: "ok" }));
+    }) as typeof fetch,
+  });
+  const notification = {
+    childNickname: "小明",
+    dueCount: 2,
+    entryPath: "/pages/review/index?childId=child-1",
+  };
+  await sender(notification, "parent-1");
+  await sender(notification, "parent-1");
+
+  assert.equal(requests.filter((request) => request.url.includes("/cgi-bin/token")).length, 1);
+  const delivery = requests.find((request) => request.url.includes("/subscribe/send"))!.body;
+  assert.deepEqual(delivery, {
+    touser: "openid-1",
+    template_id: "template-id",
+    page: "pages/review/index?childId=child-1",
+    data: {
+      thing1: { value: "小明" },
+      number2: { value: 2 },
+    },
+  });
+  assert.equal(JSON.stringify(delivery).includes("题干"), false);
 });

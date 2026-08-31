@@ -65,3 +65,37 @@ test("daily reminder dispatch is idempotent", async () => {
   await store.createReminderDispatch({ id: "dispatch-1", parentAccountId: "parent-1", childProfileId: "child-1", dateKey: "2026-08-30", sentAt: 1, status: "sent" });
   assert.match(statements[0], /ON DUPLICATE KEY UPDATE/);
 });
+
+test("mistake and first review schedule roll back as one transaction", async () => {
+  const calls: string[] = [];
+  const connection = {
+    async beginTransaction() { calls.push("begin"); },
+    async execute(sql: string) { calls.push(sql); if (sql.includes("review_schedules")) throw new Error("schedule failed"); },
+    async commit() { calls.push("commit"); },
+    async rollback() { calls.push("rollback"); },
+    release() { calls.push("release"); },
+  };
+  const store = new MysqlLearningLoopStore({ async getConnection() { return connection; } } as never);
+  await assert.rejects(() => store.createMistakeWithSchedule({ id: "m", parentAccountId: "p", childProfileId: "c", questionId: "q", primaryKnowledgePoint: "addition", secondaryKnowledgePoints: [], mistakeCause: null, masteryStatus: "not-started", createdAt: 1 }, { mistakeId: "m", parentAccountId: "p", childProfileId: "c", intervalIndex: 0, nextReviewAt: 2, masteryScore: 0, reviewCount: 0 }), /schedule failed/);
+  assert.deepEqual(calls.slice(-2), ["rollback", "release"]);
+  assert.ok(!calls.includes("commit"));
+});
+
+test("review completion updates schedule, mistake, and review atomically", async () => {
+  const calls: string[] = [];
+  const connection = { async beginTransaction() { calls.push("begin"); }, async execute(sql: string) { calls.push(sql); }, async commit() { calls.push("commit"); }, async rollback() { calls.push("rollback"); }, release() { calls.push("release"); } };
+  const store = new MysqlLearningLoopStore({ async getConnection() { return connection; } } as never);
+  await store.completeReviewAtomic({ mistakeId: "m", parentAccountId: "p", childProfileId: "c", intervalIndex: 1, nextReviewAt: 3, masteryScore: 0.4, reviewCount: 1 }, { id: "m", parentAccountId: "p", childProfileId: "c", questionId: "q", primaryKnowledgePoint: "addition", secondaryKnowledgePoints: [], mistakeCause: null, masteryStatus: "learning", createdAt: 1 }, { id: "r", parentAccountId: "p", mistakeId: "m", exerciseKind: "original", startedAt: 1, completedAt: 2, selfAssessment: "partially", variantCorrect: null, resultIntervalIndex: 1, resultNextReviewAt: 3, resultMasteryScore: 0.4 });
+  assert.equal(calls[0], "begin");
+  assert.ok(calls.some((sql) => sql.includes("UPDATE review_schedules")));
+  assert.ok(calls.some((sql) => sql.includes("UPDATE mistakes")));
+  assert.ok(calls.some((sql) => sql.includes("UPDATE reviews")));
+  assert.deepEqual(calls.slice(-2), ["commit", "release"]);
+});
+
+test("completed MySQL reviews cannot be overwritten by a replay", async () => {
+  let statement = "";
+  const store = new MysqlLearningLoopStore({ async execute(sql: string) { statement = sql; return [{}]; } } as never);
+  await store.saveReview({ id: "r", parentAccountId: "p", mistakeId: "m", exerciseKind: "original", startedAt: 1, completedAt: 2, selfAssessment: "mastered", variantCorrect: null, resultIntervalIndex: 1, resultNextReviewAt: 3, resultMasteryScore: 1 });
+  assert.match(statement, /completed_at IS NULL/);
+});

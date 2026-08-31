@@ -11,9 +11,19 @@ const apiBaseByEnvironment = Object.fromEntries(
     return [environment, value.replace(/\/$/, "")];
   }),
 );
+const reminderTemplateIdByEnvironment = Object.fromEntries(
+  environments.map((environment) => {
+    const key = `MINIPROGRAM_${environment.toUpperCase()}_REMINDER_TEMPLATE_ID`;
+    const value = process.env[key]?.trim();
+    if (!value) {
+      throw new Error(`${key} is required.`);
+    }
+    return [environment, value];
+  }),
+);
 
 writeFileSync(
   new URL("../miniprogram/config.private.js", import.meta.url),
-  `module.exports = ${JSON.stringify({ apiBaseByEnvironment }, null, 2)};\n`,
+  `module.exports = ${JSON.stringify({ apiBaseByEnvironment, reminderTemplateIdByEnvironment }, null, 2)};\n`,
   "utf8",
 );

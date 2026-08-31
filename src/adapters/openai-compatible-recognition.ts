@@ -19,9 +19,13 @@ export function createOpenAiCompatibleRecognitionClient(
   const fetchImpl = options.fetchImpl ?? fetch;
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
   const timeoutMs = options.timeoutMs ?? 30_000;
+  const maxRetries = Math.max(0, Math.min(3, options.maxRetries ?? 2));
 
   return async ({ imageDataUrl }) => {
-    const response = await fetchImpl(`${baseUrl}/v1/chat/completions`, {
+    let response: Response | undefined;
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      try {
+        response = await fetchImpl(`${baseUrl}/v1/chat/completions`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -44,7 +48,13 @@ export function createOpenAiCompatibleRecognitionClient(
         ],
       }),
       signal: AbortSignal.timeout(timeoutMs),
-    });
+        });
+        if (response.ok || response.status < 500 || attempt === maxRetries) break;
+      } catch (error) {
+        if (attempt === maxRetries) throw new Error(`Recognition request unavailable after ${attempt + 1} attempts: ${error instanceof Error ? error.message : "unknown error"}`);
+      }
+    }
+    if (!response) throw new Error("Recognition request unavailable.");
 
     if (!response.ok) {
       throw new Error(

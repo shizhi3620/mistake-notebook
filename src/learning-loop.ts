@@ -367,6 +367,7 @@ export interface LearningLoopStore {
   findParentAccountByWeChatSubject(
     weChatSubject: string,
   ): ParentAccount | undefined;
+  findWeChatSubject(parentAccountId: string): string | undefined;
   saveWeChatSubject(parentAccountId: string, weChatSubject: string): void;
   saveParentAccount(account: ParentAccount): void;
   createSession(session: LoginSession): void;
@@ -483,6 +484,7 @@ export function asAsyncLearningLoopStore(
   });
 }
 
+
 class InMemoryLearningLoopStore implements LearningLoopStore {
   private readonly accounts = new Map<string, ParentAccount>();
   private readonly weChatSubjects = new Map<string, string>();
@@ -511,6 +513,13 @@ class InMemoryLearningLoopStore implements LearningLoopStore {
   ): ParentAccount | undefined {
     const parentAccountId = this.weChatSubjects.get(weChatSubject);
     return parentAccountId ? this.accounts.get(parentAccountId) : undefined;
+  }
+
+  findWeChatSubject(parentAccountId: string): string | undefined {
+    for (const [weChatSubject, accountId] of this.weChatSubjects) {
+      if (accountId === parentAccountId) return weChatSubject;
+    }
+    return undefined;
   }
 
   saveWeChatSubject(parentAccountId: string, weChatSubject: string): void {
@@ -1043,11 +1052,16 @@ export type LearningLoopOptions = {
   explanationProvider?: (
     request: ExplanationRequest,
   ) => ExplanationContent | Promise<ExplanationContent>;
-  reminderSender?: (notification: ReminderNotification) => void;
+  reminderSender?: (
+    notification: ReminderNotification,
+    parentAccountId: string,
+  ) => void | Promise<void>;
+  imageDeleter?: (fileId: string) => Promise<void>;
 };
 
 export class LearningLoop {
   private readonly store: LearningLoopStore;
+  private readonly asyncStore: AsyncLearningLoopStore;
   private readonly now: () => number;
   private readonly sessionTtlMs: number;
   private readonly explanationProvider?: (
@@ -1055,20 +1069,376 @@ export class LearningLoop {
   ) => ExplanationContent | Promise<ExplanationContent>;
   private readonly reminderSender?: (
     notification: ReminderNotification,
-  ) => void;
+    parentAccountId: string,
+  ) => void | Promise<void>;
+  private readonly imageDeleter?: (fileId: string) => Promise<void>;
+
+  // Promise-compatible facades for the remaining legacy synchronous domain entrypoints.
+  async startReviewAsync(parentAccountId: string, mistakeId: string, options: { exercise?: "original" | "variant" } = {}): Promise<ReviewSession> {
+    const mistake = await this.asyncStore.findMistake(parentAccountId, mistakeId);
+    if (!mistake) throw new Error("Mistake record is not available to this guardian.");
+    const question = await this.asyncStore.findQuestion(parentAccountId, mistake.questionId);
+    if (!question) throw new Error("Question is not available to this guardian.");
+    if (options.exercise === "variant") {
+      if (!this.explanationProvider) {
+        throw new Error("A variant exercise requires an explanation provider.");
+      }
+      const account = await this.asyncStore.findParentAccount(parentAccountId);
+      if (!account) throw new Error("Parent account was not found.");
+      const child = await this.asyncStore.findChildProfile(parentAccountId, mistake.childProfileId);
+      if (!child) throw new Error("Child profile is not available to this guardian.");
+      const used = await this.asyncStore.countVariantReviewsSince(parentAccountId, shanghaiMonthStart(this.now()));
+      const variantQuota = PLAN_ENTITLEMENTS[account.plan].monthlyVariantExerciseQuota;
+      if (variantQuota !== null && used >= variantQuota) {
+        throw new Error(
+          `本月变式练习额度已用完（${variantQuota} 次）；可继续用原题复习，或升级订阅获得不限量变式练习。`,
+        );
+      }
+      const exercise = await this.explanationProvider({
+        stem: question.stem,
+        formulas: question.formulas,
+        grade: child.grade,
+        studentAnswer: question.studentAnswer,
+        skipAnswerAnalysis: question.answerAnalysisSkipped,
+      });
+      const review: Review = { id: randomUUID(), parentAccountId, mistakeId: mistake.id, exerciseKind: "variant", startedAt: this.now(), completedAt: null, selfAssessment: null, variantCorrect: null, resultIntervalIndex: null, resultNextReviewAt: null, resultMasteryScore: null };
+      await this.asyncStore.createReview(review);
+      return { reviewId: review.id, recallPrompt: `先回忆「${mistake.primaryKnowledgePoint}」的知识点和解题思路，再开始作答。`, exercise: { kind: "variant", stem: exercise.variantExercise.stem } };
+    }
+    const review: Review = { id: randomUUID(), parentAccountId, mistakeId: mistake.id, exerciseKind: "original", startedAt: this.now(), completedAt: null, selfAssessment: null, variantCorrect: null, resultIntervalIndex: null, resultNextReviewAt: null, resultMasteryScore: null };
+    await this.asyncStore.createReview(review);
+    return { reviewId: review.id, recallPrompt: `先回忆「${mistake.primaryKnowledgePoint}」的知识点和解题思路，再开始作答。`, exercise: { kind: "original", stem: question.stem } };
+  }
+  async getDueReviewsAsync(parentAccountId: string, childProfileId: string): Promise<DueReview[]> {
+    const child = await this.asyncStore.findChildProfile(parentAccountId, childProfileId);
+    if (!child) throw new Error("Child profile is not available to this guardian.");
+    const schedules = await this.asyncStore.listDueReviewSchedules(parentAccountId, childProfileId, this.now());
+    const entries = await Promise.all(schedules.map(async (schedule) => {
+      const mistake = await this.asyncStore.findMistake(parentAccountId, schedule.mistakeId);
+      const question = mistake ? await this.asyncStore.findQuestion(parentAccountId, mistake.questionId) : undefined;
+      return mistake && question ? { ...mistake, stem: question.stem, nextReviewAt: schedule.nextReviewAt, masteryScore: schedule.masteryScore } : undefined;
+    }));
+    return entries.filter((entry): entry is DueReview => entry !== undefined).sort((a, b) => a.nextReviewAt - b.nextReviewAt);
+  }
+  async listMistakesAsync(parentAccountId: string, childProfileId: string, filters: MistakeFilters = {}): Promise<MistakeBookEntry[]> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    const child = await this.asyncStore.findChildProfile(parentAccountId, childProfileId);
+    if (!child) throw new Error("Child profile is not available to this guardian.");
+    const mistakes = await this.asyncStore.listMistakes(parentAccountId, childProfileId);
+    const entries = await Promise.all(mistakes.map(async (mistake) => {
+      const question = await this.asyncStore.findQuestion(parentAccountId, mistake.questionId);
+      return question ? { ...mistake, stem: question.stem } : undefined;
+    }));
+    return entries.filter((entry): entry is MistakeBookEntry => entry !== undefined).filter((entry) => this.matchesMistakeFilters(entry, filters)).sort((a, b) => a.createdAt - b.createdAt);
+  }
+  async findDuplicateMistakesAsync(
+    parentAccountId: string,
+    childProfileId: string,
+  ): Promise<MistakeBookEntry[][]> {
+    const entries = await this.listMistakesAsync(parentAccountId, childProfileId);
+    const groups = new Map<string, MistakeBookEntry[]>();
+
+    for (const entry of entries) {
+      const key = normalizeStemForDuplicateCheck(entry.stem);
+      const group = groups.get(key) ?? [];
+      group.push(entry);
+      groups.set(key, group);
+    }
+
+    return [...groups.values()].filter((group) => group.length > 1);
+  }
+  async mergeMistakesAsync(
+    parentAccountId: string,
+    keepMistakeId: string,
+    duplicateMistakeId: string,
+  ): Promise<MistakeRecord> {
+    const [account, keep, duplicate] = await Promise.all([
+      this.asyncStore.findParentAccount(parentAccountId),
+      this.asyncStore.findMistake(parentAccountId, keepMistakeId),
+      this.asyncStore.findMistake(parentAccountId, duplicateMistakeId),
+    ]);
+    if (!account) throw new Error("Parent account was not found.");
+    if (!keep || !duplicate) {
+      throw new Error("Mistake record is not available to this guardian.");
+    }
+    if (keep.id === duplicate.id) {
+      throw new Error("A mistake cannot be merged into itself.");
+    }
+    if (keep.childProfileId !== duplicate.childProfileId) {
+      throw new Error("Mistakes from different children cannot be merged.");
+    }
+
+    const merged = {
+      ...keep,
+      secondaryKnowledgePoints: [
+        ...new Set([
+          ...keep.secondaryKnowledgePoints,
+          ...duplicate.secondaryKnowledgePoints,
+        ]),
+      ].slice(0, 2),
+      mistakeCause: keep.mistakeCause ?? duplicate.mistakeCause,
+      createdAt: Math.min(keep.createdAt, duplicate.createdAt),
+    };
+    await this.asyncStore.saveMistake(merged);
+    await this.asyncStore.deleteMistake(parentAccountId, duplicate.id);
+    await this.asyncStore.deleteQuestion(parentAccountId, duplicate.questionId);
+    return merged;
+  }
+  async getWeeklyReportAsync(parentAccountId: string, childProfileId: string): Promise<WeeklyReport> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    const child = await this.asyncStore.findChildProfile(parentAccountId, childProfileId);
+    if (!child) throw new Error("Child profile is not available to this guardian.");
+    const weekStart = shanghaiWeekStart(this.now());
+    const weekEnd = weekStart + 7 * DAY_MS;
+    const [mistakes, completedReviews, practiceEvidence] = await Promise.all([
+      this.asyncStore.listMistakes(parentAccountId, childProfileId),
+      this.asyncStore.listCompletedReviewsSince(parentAccountId, childProfileId, 0),
+      this.asyncStore.listCorrectPracticeEvidence(parentAccountId, childProfileId),
+    ]);
+    const schedules = new Map(
+      (await Promise.all(mistakes.map((mistake) =>
+        this.asyncStore.findReviewSchedule(parentAccountId, mistake.id),
+      )))
+        .filter((schedule): schedule is ReviewSchedule => schedule !== undefined)
+        .map((schedule) => [schedule.mistakeId, schedule]),
+    );
+    const correctPracticeByKnowledgePoint = new Map<string, number>();
+    for (const evidence of practiceEvidence) {
+      if (!evidence.knowledgePoint) continue;
+      correctPracticeByKnowledgePoint.set(
+        evidence.knowledgePoint,
+        (correctPracticeByKnowledgePoint.get(evidence.knowledgePoint) ?? 0) + 1,
+      );
+    }
+    const weekReviews = completedReviews.filter((review) =>
+      review.completedAt! >= weekStart && review.completedAt! < weekEnd,
+    );
+    const reviewDeltas = weekReviews.map((review) =>
+      masteryDeltaFor(review.selfAssessment!, review.variantCorrect),
+    );
+    const reviewsByMistake = new Map<string, Review[]>();
+    for (const review of completedReviews) {
+      const reviews = reviewsByMistake.get(review.mistakeId) ?? [];
+      reviews.push(review);
+      reviewsByMistake.set(review.mistakeId, reviews);
+    }
+    const mistakesByKnowledgePoint = new Map<string, MistakeRecord[]>();
+    for (const mistake of mistakes) {
+      const group = mistakesByKnowledgePoint.get(mistake.primaryKnowledgePoint) ?? [];
+      group.push(mistake);
+      mistakesByKnowledgePoint.set(mistake.primaryKnowledgePoint, group);
+    }
+    const weaknesses = [...mistakesByKnowledgePoint.entries()]
+      .map(([knowledgePoint, group]) => {
+        const reviews = group.flatMap((mistake) => reviewsByMistake.get(mistake.id) ?? []);
+        const masteryScores = group.map((mistake) => schedules.get(mistake.id)?.masteryScore ?? 0);
+        const averageMasteryScore = masteryScores.reduce((sum, score) => sum + score, 0) / masteryScores.length;
+        const strugglingReviews = reviews.filter((review) => review.selfAssessment === "not-yet").length;
+        const variantMisses = reviews.filter((review) => review.variantCorrect === false).length;
+        const correctPracticeCount = correctPracticeByKnowledgePoint.get(knowledgePoint) ?? 0;
+        return {
+          knowledgePoint,
+          weaknessScore: roundToTwo(2 * group.length + 2 * strugglingReviews + 2 * variantMisses + 4 * (1 - averageMasteryScore) - correctPracticeCount),
+          mistakeCount: group.length,
+          correctPracticeCount,
+          averageMasteryScore: roundToTwo(averageMasteryScore),
+          strugglingReviews,
+          variantMisses,
+          mistakeIds: group.map((mistake) => mistake.id),
+          suggestion: `「${knowledgePoint}」还不够稳：用一道变式题检验理解，并回顾 ${group.length} 道相关错题的错因。`,
+        };
+      })
+      .sort((a, b) => b.weaknessScore - a.weaknessScore || (a.knowledgePoint < b.knowledgePoint ? -1 : 1))
+      .slice(0, 3);
+    const dueNextWeek = mistakes.filter((mistake) => {
+      const schedule = schedules.get(mistake.id);
+      return schedule !== undefined && schedule.nextReviewAt >= weekEnd && schedule.nextReviewAt < weekEnd + 7 * DAY_MS;
+    });
+    const full = PLAN_ENTITLEMENTS[account.plan].fullWeeklyReport;
+    const empty = mistakes.length === 0;
+    const topWeakness = weaknesses[0];
+    return {
+      childId: childProfileId,
+      weekStart,
+      weekEnd,
+      full,
+      empty,
+      newMistakes: mistakes.filter((mistake) => mistake.createdAt >= weekStart && mistake.createdAt < weekEnd).length,
+      completedReviews: weekReviews.length,
+      masteryChange: {
+        netChange: roundToTwo(reviewDeltas.reduce((sum, delta) => sum + delta, 0)),
+        improvedReviews: reviewDeltas.filter((delta) => delta > 0).length,
+        declinedReviews: reviewDeltas.filter((delta) => delta < 0).length,
+      },
+      weaknesses: full ? weaknesses : [],
+      nextWeekPlan: {
+        scheduledReviews: dueNextWeek.length,
+        focusKnowledgePoints: full ? [...new Set(dueNextWeek.map((mistake) => mistake.primaryKnowledgePoint))].slice(0, 3) : [],
+      },
+      suggestion: empty
+        ? "本周还没有学习记录，可以先拍一道错题开始积累。"
+        : full && topWeakness
+          ? `下周优先巩固「${topWeakness.knowledgePoint}」：安排一次变式练习，并回顾对应错因。`
+          : "本周保持复习节奏，巩固已收录的错题。",
+      upgradeNote: full ? null : "升级订阅可查看完整周报，包括薄弱知识点排序与下周复习重点。",
+      comparisonNote: WEEKLY_REPORT_COMPARISON_NOTE,
+    };
+  }
+  async saveMistakeAsync(parentAccountId: string, questionId: string, details: { primaryKnowledgePoint: string; secondaryKnowledgePoints?: string[]; mistakeCause?: string }): Promise<MistakeRecord> {
+    const question = await this.findQuestionForGuardianAsync(parentAccountId, questionId);
+    if (question.status !== "confirmed") throw new Error("An unreliable question cannot be saved as a mistake; confirm the stem first.");
+    const primaryKnowledgePoint = details.primaryKnowledgePoint.trim(); if (!primaryKnowledgePoint) throw new Error("A primary knowledge point is required.");
+    const secondaryKnowledgePoints = (details.secondaryKnowledgePoints ?? []).map((point) => point.trim()); if (secondaryKnowledgePoints.length > 2) throw new Error("At most two secondary knowledge points are allowed.");
+    const existing = await this.asyncStore.findMistakeByQuestion(parentAccountId, questionId);
+    if (existing) return existing;
+    const mistake: MistakeRecord = { id: randomUUID(), parentAccountId, childProfileId: question.childProfileId, questionId: question.id, primaryKnowledgePoint, secondaryKnowledgePoints, mistakeCause: details.mistakeCause?.trim() || null, masteryStatus: "not-started", createdAt: this.now() };
+    const schedule: ReviewSchedule = { mistakeId: mistake.id, parentAccountId, childProfileId: question.childProfileId, intervalIndex: 0, nextReviewAt: shanghaiDayStartAfter(this.now(), REVIEW_INTERVAL_DAYS[0]), masteryScore: 0, reviewCount: 0 };
+    const atomicStore = this.asyncStore as AsyncLearningLoopStore & { createMistakeWithSchedule?: (mistake: MistakeRecord, schedule: ReviewSchedule) => Promise<void> };
+    if (atomicStore.createMistakeWithSchedule) await atomicStore.createMistakeWithSchedule(mistake, schedule);
+    else { await this.asyncStore.createMistake(mistake); await this.asyncStore.createReviewSchedule(schedule); }
+    return mistake;
+  }
+
+  async recordStudentAnswerAsync(parentAccountId: string, questionId: string, entry: { answer?: string; skipAnalysis?: boolean }): Promise<ConfirmedQuestion> {
+    const question = await this.findQuestionForGuardianAsync(parentAccountId, questionId);
+    if (entry.skipAnalysis) { question.studentAnswer = null; question.answerAnalysisSkipped = true; }
+    else { question.studentAnswer = entry.answer?.trim() || null; question.answerAnalysisSkipped = false; }
+    await this.asyncStore.saveQuestion(question); return question;
+  }
+  async updateMistakeCauseAsync(parentAccountId: string, mistakeId: string, mistakeCause: string): Promise<MistakeRecord> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    const mistake = await this.asyncStore.findMistake(parentAccountId, mistakeId);
+    if (!mistake) throw new Error("Mistake record is not available to this guardian.");
+    mistake.mistakeCause = mistakeCause.trim() || null;
+    await this.asyncStore.saveMistake(mistake);
+    return mistake;
+  }
+  async completeReviewAsync(parentAccountId: string, reviewId: string, outcome: { selfAssessment: ReviewSelfAssessment; variantCorrect: boolean | null }): Promise<ReviewResult> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    const review = await this.asyncStore.findReview(parentAccountId, reviewId);
+    if (!review) throw new Error("Review is not available to this guardian.");
+    if (review.completedAt !== null && review.resultIntervalIndex !== null && review.resultNextReviewAt !== null && review.resultMasteryScore !== null) return { alreadyRecorded: true, intervalDays: REVIEW_INTERVAL_DAYS[review.resultIntervalIndex], nextReviewAt: review.resultNextReviewAt, masteryScore: review.resultMasteryScore, masteryStatus: masteryStatusFor(review.resultMasteryScore), masteryNote: MASTERY_NOTE };
+    const schedule = await this.asyncStore.findReviewSchedule(parentAccountId, review.mistakeId);
+    const mistake = await this.asyncStore.findMistake(parentAccountId, review.mistakeId);
+    if (!schedule || !mistake) throw new Error("Review schedule is not available to this guardian.");
+    let intervalIndex = schedule.intervalIndex;
+    if (outcome.selfAssessment === "mastered") intervalIndex = Math.min(intervalIndex + 1, REVIEW_INTERVAL_DAYS.length - 1);
+    else if (outcome.selfAssessment === "not-yet") intervalIndex = 0;
+    if (outcome.variantCorrect === false) intervalIndex = Math.max(0, intervalIndex - 1);
+    const masteryScore = Math.round(Math.min(1, Math.max(0, schedule.masteryScore + masteryDeltaFor(outcome.selfAssessment, outcome.variantCorrect))) * 100) / 100;
+    const nextReviewAt = shanghaiDayStartAfter(this.now(), REVIEW_INTERVAL_DAYS[intervalIndex]);
+    schedule.intervalIndex = intervalIndex; schedule.nextReviewAt = nextReviewAt; schedule.masteryScore = masteryScore; schedule.reviewCount += 1;
+    mistake.masteryStatus = masteryStatusFor(masteryScore); review.completedAt = this.now(); review.selfAssessment = outcome.selfAssessment; review.variantCorrect = outcome.variantCorrect; review.resultIntervalIndex = intervalIndex; review.resultNextReviewAt = nextReviewAt; review.resultMasteryScore = masteryScore;
+    const atomicStore = this.asyncStore as AsyncLearningLoopStore & { completeReviewAtomic?: (schedule: ReviewSchedule, mistake: MistakeRecord, review: Review) => Promise<void> };
+    if (atomicStore.completeReviewAtomic) await atomicStore.completeReviewAtomic(schedule, mistake, review);
+    else { await this.asyncStore.saveReviewSchedule(schedule); await this.asyncStore.saveMistake(mistake); await this.asyncStore.saveReview(review); }
+    return { alreadyRecorded: false, intervalDays: REVIEW_INTERVAL_DAYS[intervalIndex], nextReviewAt, masteryScore, masteryStatus: mistake.masteryStatus, masteryNote: MASTERY_NOTE };
+  }
+  async getReviewScheduleAsync(parentAccountId: string, mistakeId: string): Promise<ReviewScheduleView> {
+    const mistake = await this.asyncStore.findMistake(parentAccountId, mistakeId);
+    if (!mistake) throw new Error("Mistake record is not available to this guardian.");
+    const schedule = await this.asyncStore.findReviewSchedule(parentAccountId, mistake.id);
+    if (!schedule) throw new Error("Review schedule is not available to this guardian.");
+    return { mistakeId: schedule.mistakeId, intervalDays: REVIEW_INTERVAL_DAYS[schedule.intervalIndex], nextReviewAt: schedule.nextReviewAt, masteryScore: schedule.masteryScore, masteryStatus: mistake.masteryStatus, reviewCount: schedule.reviewCount, masteryNote: MASTERY_NOTE };
+  }
+  async deleteMistakeAsync(parentAccountId: string, mistakeId: string): Promise<void> {
+    const mistake = await this.asyncStore.findMistake(parentAccountId, mistakeId);
+    if (!mistake) throw new Error("Mistake record is not available to this guardian.");
+    const question = await this.asyncStore.findQuestion(parentAccountId, mistake.questionId);
+    await this.asyncStore.deleteMistake(parentAccountId, mistake.id);
+    await this.asyncStore.deleteQuestion(parentAccountId, mistake.questionId);
+    if (question?.imageKey && this.imageDeleter) { try { await this.imageDeleter(question.imageKey); } catch { /* retry is handled by retention worker */ } }
+  }
+  async updateReminderSettingsAsync(parentAccountId: string, childProfileId: string, settings: { enabled: boolean; hourOfDay: number }): Promise<ReminderSettings> {
+    const child = await this.asyncStore.findChildProfile(parentAccountId, childProfileId);
+    if (!child) throw new Error("Child profile is not available to this guardian.");
+    if (!Number.isInteger(settings.hourOfDay) || settings.hourOfDay < 0 || settings.hourOfDay > 23) throw new Error("Reminder hour must be a whole hour from 0 to 23.");
+    const reminderSettings: ReminderSettings = { parentAccountId, childProfileId, enabled: settings.enabled, hourOfDay: settings.hourOfDay };
+    await this.asyncStore.saveReminderSettings(reminderSettings); return reminderSettings;
+  }
+  async dispatchDueRemindersAsync(): Promise<ReminderDispatchOutcome[]> {
+    const now = this.now(); const dateKey = shanghaiDateKey(now); const hourOfDay = shanghaiHour(now); const outcomes: ReminderDispatchOutcome[] = [];
+    for (const settings of await this.asyncStore.listEnabledReminderSettings()) {
+      if (hourOfDay < settings.hourOfDay) continue;
+      if (await this.asyncStore.findReminderDispatch(settings.parentAccountId, settings.childProfileId, dateKey)) continue;
+      const due = await this.asyncStore.listDueReviewSchedules(settings.parentAccountId, settings.childProfileId, now);
+      if (!due.length) continue;
+      const child = await this.asyncStore.findChildProfile(settings.parentAccountId, settings.childProfileId); if (!child) continue;
+      let status: ReminderDispatch["status"] = "sent";
+      try { if (!this.reminderSender) throw new Error("Reminder channel is not configured."); await this.reminderSender({ childNickname: child.nickname, dueCount: due.length, entryPath: `/pages/review/index?childId=${child.id}` }, settings.parentAccountId); } catch { status = "failed"; }
+      await this.asyncStore.createReminderDispatch({ id: randomUUID(), parentAccountId: settings.parentAccountId, childProfileId: settings.childProfileId, dateKey, sentAt: now, status }); outcomes.push({ childProfileId: settings.childProfileId, status });
+    }
+    return outcomes;
+  }
+  async getReminderSettingsAsync(parentAccountId: string, childProfileId: string): Promise<ReminderSettings | undefined> {
+    const child = await this.asyncStore.findChildProfile(parentAccountId, childProfileId);
+    if (!child) throw new Error("Child profile is not available to this guardian.");
+    return await this.asyncStore.findReminderSettings(parentAccountId, childProfileId);
+  }
+  async deleteChildProfileAsync(parentAccountId: string, childProfileId: string): Promise<void> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    const child = await this.asyncStore.findChildProfile(parentAccountId, childProfileId);
+    if (!child) throw new Error("Child profile is not available to this guardian.");
+    const imageKeys = await this.findMistakeImageKeys(parentAccountId, childProfileId);
+    await this.asyncStore.deleteChildProfile(parentAccountId, childProfileId);
+    await this.deleteImageKeys(imageKeys);
+  }
+  async deleteParentAccountAsync(parentAccountId: string): Promise<void> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    const children = await this.asyncStore.listChildProfiles(parentAccountId);
+    const imageKeys = new Set<string>();
+    for (const child of children) {
+      for (const imageKey of await this.findMistakeImageKeys(parentAccountId, child.id)) {
+        imageKeys.add(imageKey);
+      }
+    }
+    await this.asyncStore.deleteParentAccount(parentAccountId);
+    await this.deleteImageKeys(imageKeys);
+  }
+
+  private async findMistakeImageKeys(
+    parentAccountId: string,
+    childProfileId: string,
+  ): Promise<Set<string>> {
+    const imageKeys = new Set<string>();
+    for (const mistake of await this.asyncStore.listMistakes(parentAccountId, childProfileId)) {
+      const question = await this.asyncStore.findQuestion(parentAccountId, mistake.questionId);
+      if (question?.imageKey) imageKeys.add(question.imageKey);
+    }
+    return imageKeys;
+  }
+
+  private async deleteImageKeys(imageKeys: Iterable<string>): Promise<void> {
+    if (!this.imageDeleter) return;
+    for (const imageKey of imageKeys) {
+      try {
+        await this.imageDeleter(imageKey);
+      } catch {
+        // The retention worker retries object deletion without restoring relational data.
+      }
+    }
+  }
 
   constructor(
-    store: LearningLoopStore = new InMemoryLearningLoopStore(),
+    store: LearningLoopStore | AsyncLearningLoopStore = new InMemoryLearningLoopStore(),
     options: LearningLoopOptions = {},
   ) {
-    this.store = store;
+    this.store = store as LearningLoopStore;
+    this.asyncStore = asAsyncLearningLoopStore(store);
     this.now = options.now ?? Date.now;
     this.sessionTtlMs = options.sessionTtlMs ?? SESSION_TTL_MS;
     this.explanationProvider = options.explanationProvider;
     this.reminderSender = options.reminderSender;
+    this.imageDeleter = options.imageDeleter;
   }
 
-  startWeChatLogin(weChatSubject: string): WeChatLogin {
+  private startWeChatLogin(weChatSubject: string): WeChatLogin {
     if (!weChatSubject.trim()) {
       throw new Error("WeChat identity is required to start a session.");
     }
@@ -1094,7 +1464,20 @@ export class LearningLoop {
     return { account, session };
   }
 
-  resumeSession(token: string): ParentAccount {
+  async startWeChatLoginAsync(weChatSubject: string): Promise<WeChatLogin> {
+    if (!weChatSubject.trim()) throw new Error("WeChat identity is required to start a session.");
+    let account = await this.asyncStore.findParentAccountByWeChatSubject(weChatSubject);
+    if (!account) {
+      account = { id: randomUUID(), guardianshipConfirmed: false, allowDirectAnswerReveal: false, plan: "free" };
+      await this.asyncStore.createParentAccount(account);
+      await this.asyncStore.saveWeChatSubject(account.id, weChatSubject);
+    }
+    const session: LoginSession = { token: randomUUID(), parentAccountId: account.id, expiresAt: this.now() + this.sessionTtlMs };
+    await this.asyncStore.createSession(session);
+    return { account, session };
+  }
+
+  private resumeSession(token: string): ParentAccount {
     const session = this.store.findSession(token);
     const account = session
       ? this.store.findParentAccount(session.parentAccountId)
@@ -1109,7 +1492,14 @@ export class LearningLoop {
     return account;
   }
 
-  startQuestionDraft(
+  async resumeSessionAsync(token: string): Promise<ParentAccount> {
+    const session = await this.asyncStore.findSession(token);
+    const account = session ? await this.asyncStore.findParentAccount(session.parentAccountId) : undefined;
+    if (!session || !account || session.expiresAt <= this.now()) throw new Error("Session is no longer valid; please log in again with WeChat.");
+    return account;
+  }
+
+  private startQuestionDraft(
     parentAccountId: string,
     childProfileId: string,
     source: QuestionSource,
@@ -1139,7 +1529,17 @@ export class LearningLoop {
     return draft;
   }
 
-  updateQuestionDraft(
+  async startQuestionDraftAsync(parentAccountId: string, childProfileId: string, source: QuestionSource): Promise<QuestionDraft> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account?.guardianshipConfirmed) throw new Error("Guardianship confirmation is required before capturing a question.");
+    const child = await this.asyncStore.findChildProfile(parentAccountId, childProfileId);
+    if (!child) throw new Error("Child profile is not available to this guardian.");
+    const draft: QuestionDraft = { id: randomUUID(), parentAccountId, childProfileId, source, imageKey: null, crop: null, rotationDegrees: 0, recognition: null };
+    await this.asyncStore.createQuestionDraft(draft);
+    return draft;
+  }
+
+  private updateQuestionDraft(
     parentAccountId: string,
     draftId: string,
     edits: { crop?: CropRegion; rotationDegrees?: number },
@@ -1162,7 +1562,14 @@ export class LearningLoop {
     return draft;
   }
 
-  requestPhotoUpload(
+  async updateQuestionDraftAsync(parentAccountId: string, draftId: string, edits: { crop?: CropRegion; rotationDegrees?: number }): Promise<QuestionDraft> {
+    const draft = await this.findQuestionDraftForGuardianAsync(parentAccountId, draftId);
+    if (edits.rotationDegrees !== undefined) { if (![0, 90, 180, 270].includes(edits.rotationDegrees)) throw new Error("Rotation must be 0, 90, 180, or 270 degrees."); draft.rotationDegrees = edits.rotationDegrees; }
+    if (edits.crop !== undefined) { this.validateCropRegion(edits.crop); draft.crop = edits.crop; }
+    await this.asyncStore.saveQuestionDraft(draft); return draft;
+  }
+
+  private requestPhotoUpload(
     parentAccountId: string,
     draftId: string,
   ): PhotoUploadCredential {
@@ -1180,7 +1587,28 @@ export class LearningLoop {
     return credential;
   }
 
-  completePhotoUpload(
+  async requestPhotoUploadAsync(parentAccountId: string, draftId: string): Promise<PhotoUploadCredential> {
+    const draft = await this.findQuestionDraftForGuardianAsync(parentAccountId, draftId);
+    const credential: PhotoUploadCredential = { uploadToken: randomUUID(), parentAccountId, draftId: draft.id, imageKey: `questions/${draft.id}/${randomUUID()}`, expiresAt: this.now() + UPLOAD_CREDENTIAL_TTL_MS, usedAt: null };
+    await this.asyncStore.createUploadCredential(credential); return credential;
+  }
+
+  async getPhotoUploadCredentialAsync(
+    parentAccountId: string,
+    uploadToken: string,
+  ): Promise<PhotoUploadCredential> {
+    const credential = await this.asyncStore.findUploadCredential(uploadToken);
+    if (!credential || credential.parentAccountId !== parentAccountId) {
+      throw new Error("Upload credential is not available to this guardian.");
+    }
+    const draft = await this.asyncStore.findQuestionDraft(parentAccountId, credential.draftId);
+    if (!draft) throw new Error("Upload credential is no longer valid; start a new draft to retry.");
+    if (credential.usedAt !== null) throw new Error("Upload credential has already been used; request a new one to retry.");
+    if (credential.expiresAt <= this.now()) throw new Error("Upload credential has expired; request a new one to retry the upload.");
+    return credential;
+  }
+
+  private completePhotoUpload(
     parentAccountId: string,
     uploadToken: string,
   ): QuestionDraft {
@@ -1221,12 +1649,39 @@ export class LearningLoop {
     return draft;
   }
 
-  cancelQuestionDraft(parentAccountId: string, draftId: string): void {
+  async completePhotoUploadAsync(
+    parentAccountId: string,
+    uploadToken: string,
+    uploadedFileId?: string,
+  ): Promise<QuestionDraft> {
+    const credential = await this.getPhotoUploadCredentialAsync(parentAccountId, uploadToken);
+    const draft = (await this.asyncStore.findQuestionDraft(parentAccountId, credential.draftId))!;
+    credential.usedAt = this.now();
+    await this.asyncStore.saveUploadCredential(credential);
+    draft.imageKey = uploadedFileId ?? credential.imageKey;
+    await this.asyncStore.saveQuestionDraft(draft);
+    return draft;
+  }
+
+  async reselectDraftImageAsync(parentAccountId: string, draftId: string): Promise<QuestionDraft> {
+    const draft = await this.asyncStore.findQuestionDraft(parentAccountId, draftId);
+    if (!draft) throw new Error("Question draft is not available to this guardian.");
+    draft.imageKey = null; draft.recognition = null; draft.crop = null; draft.rotationDegrees = 0;
+    await this.asyncStore.saveQuestionDraft(draft); return draft;
+  }
+
+  private cancelQuestionDraft(parentAccountId: string, draftId: string): void {
     this.findQuestionDraftForGuardian(parentAccountId, draftId);
     this.store.deleteQuestionDraft(parentAccountId, draftId);
   }
 
-  reselectDraftImage(
+  async cancelQuestionDraftAsync(parentAccountId: string, draftId: string): Promise<void> {
+    const draft = await this.asyncStore.findQuestionDraft(parentAccountId, draftId);
+    if (!draft) throw new Error("Question draft is not available to this guardian.");
+    await this.asyncStore.deleteQuestionDraft(parentAccountId, draftId);
+  }
+
+  private reselectDraftImage(
     parentAccountId: string,
     draftId: string,
   ): QuestionDraft {
@@ -1241,7 +1696,7 @@ export class LearningLoop {
     return draft;
   }
 
-  recordQuestionRecognition(
+  private recordQuestionRecognition(
     parentAccountId: string,
     draftId: string,
     recognition: QuestionRecognition,
@@ -1257,7 +1712,16 @@ export class LearningLoop {
     return draft;
   }
 
-  confirmQuestion(
+  async recordQuestionRecognitionAsync(parentAccountId: string, draftId: string, recognition: QuestionRecognition): Promise<QuestionDraft> {
+    const draft = await this.asyncStore.findQuestionDraft(parentAccountId, draftId);
+    if (!draft) throw new Error("Question draft is not available to this guardian.");
+    if (recognition.confidence < 0 || recognition.confidence > 1) throw new Error("Recognition confidence must be between 0 and 1.");
+    draft.recognition = recognition;
+    await this.asyncStore.saveQuestionDraft(draft);
+    return draft;
+  }
+
+  private confirmQuestion(
     parentAccountId: string,
     draftId: string,
     confirmation: { stem: string; studentAnswer?: string },
@@ -1313,7 +1777,19 @@ export class LearningLoop {
     return question;
   }
 
-  createHomeworkReview(
+  async confirmQuestionAsync(parentAccountId: string, draftId: string, confirmation: { stem: string; studentAnswer?: string }): Promise<ConfirmedQuestion> {
+    const draft = await this.asyncStore.findQuestionDraft(parentAccountId, draftId);
+    if (!draft) throw new Error("Question draft is not available to this guardian.");
+    const stem = confirmation.stem.trim(); if (!stem) throw new Error("A question stem is required to confirm the question.");
+    const account = await this.asyncStore.findParentAccount(parentAccountId); if (!account) throw new Error("Parent account was not found.");
+    const used = await this.asyncStore.countQuestionsSince(parentAccountId, shanghaiMonthStart(this.now()));
+    const entitlement = PLAN_ENTITLEMENTS[account.plan]; if (used >= entitlement.monthlyPhotoQuota) throw new Error(`本月拍题额度已用完（${entitlement.monthlyPhotoQuota} 道）；升级订阅可获得更高额度，或等待下月额度重置。`);
+    const recognition = draft.recognition; const reliable = recognition === null || recognition.confidence >= RECOGNITION_CONFIDENCE_THRESHOLD || recognition.stem !== confirmation.stem;
+    const question: ConfirmedQuestion = { id: randomUUID(), parentAccountId, childProfileId: draft.childProfileId, source: draft.source, stem, formulas: recognition?.formulas ?? [], imageKey: draft.imageKey, crop: draft.crop, rotationDegrees: draft.rotationDegrees, region: recognition?.region ?? null, studentAnswer: (confirmation.studentAnswer ?? recognition?.studentAnswer)?.trim() || null, answerAnalysisSkipped: false, status: reliable ? "confirmed" : "pending-confirmation", createdAt: this.now() };
+    await this.asyncStore.createQuestion(question); await this.asyncStore.deleteQuestionDraft(parentAccountId, draftId); return question;
+  }
+
+  private createHomeworkReview(
     parentAccountId: string,
     childProfileId: string,
     recognition: HomeworkRecognition,
@@ -1368,11 +1844,34 @@ export class LearningLoop {
     return review;
   }
 
-  getHomeworkReview(parentAccountId: string, homeworkReviewId: string): HomeworkReview {
+  async createHomeworkReviewAsync(parentAccountId: string, childProfileId: string, recognition: HomeworkRecognition): Promise<HomeworkReview> {
+    const child = await this.asyncStore.findChildProfile(parentAccountId, childProfileId);
+    if (!child) throw new Error("Child profile is not available to this guardian.");
+    if (!Array.isArray(recognition.questions) || recognition.questions.length === 0) throw new Error("A homework review must contain at least one math question.");
+    const candidates = recognition.questions.map((question) => {
+      if (!question.stem?.trim()) throw new Error("Each homework question needs a stem.");
+      if (!Number.isFinite(question.confidence) || question.confidence < 0 || question.confidence > 1) throw new Error("Homework recognition confidence must be between 0 and 1.");
+      if (question.studentAnswerConfidence !== null && (!Number.isFinite(question.studentAnswerConfidence) || question.studentAnswerConfidence < 0 || question.studentAnswerConfidence > 1)) throw new Error("Handwritten answer confidence must be between 0 and 1.");
+      if (question.suggestedSecondaryKnowledgePoints.length > 2) throw new Error("At most two secondary knowledge points may be suggested.");
+      return { ...question, id: randomUUID(), stem: question.stem.trim(), studentAnswer: question.studentAnswer?.trim() || null, referenceAnswer: question.referenceAnswer?.trim() || null, reasoning: question.reasoning?.trim() || null, suggestedPrimaryKnowledgePoint: question.suggestedPrimaryKnowledgePoint?.trim() || null, suggestedSecondaryKnowledgePoints: question.suggestedSecondaryKnowledgePoints.map((point) => point.trim()).filter(Boolean), suggestedMistakeCause: question.suggestedMistakeCause?.trim() || null, confirmedVerdict: null, questionId: null, mistakeId: null };
+    });
+    const review: HomeworkReview = { id: randomUUID(), parentAccountId, childProfileId, imageKey: null, createdAt: this.now(), candidates };
+    await this.asyncStore.createHomeworkReview(review); return review;
+  }
+
+  private getHomeworkReview(parentAccountId: string, homeworkReviewId: string): HomeworkReview {
     return this.findHomeworkReviewForGuardian(parentAccountId, homeworkReviewId);
   }
 
-  confirmHomeworkQuestion(
+  async getHomeworkReviewAsync(parentAccountId: string, homeworkReviewId: string): Promise<HomeworkReview> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    const review = await this.asyncStore.findHomeworkReview(parentAccountId, homeworkReviewId);
+    if (!review) throw new Error("Homework review is not available to this guardian.");
+    return review;
+  }
+
+  private confirmHomeworkQuestion(
     parentAccountId: string,
     homeworkReviewId: string,
     candidateId: string,
@@ -1444,7 +1943,38 @@ export class LearningLoop {
     return candidate;
   }
 
-  confirmGuardianship(parentAccountId: string): ParentAccount {
+  async confirmHomeworkQuestionAsync(parentAccountId: string, homeworkReviewId: string, candidateId: string, confirmation: { verdict: HomeworkVerdict; stem?: string; studentAnswer?: string | null; primaryKnowledgePoint?: string; secondaryKnowledgePoints?: string[]; mistakeCause?: string | null }): Promise<HomeworkQuestionCandidate> {
+    const review = await this.findHomeworkReviewForGuardianAsync(parentAccountId, homeworkReviewId);
+    const candidate = review.candidates.find((entry) => entry.id === candidateId);
+    if (!candidate) throw new Error("Homework question is not available to this guardian.");
+    if (candidate.confirmedVerdict !== null) return candidate;
+    if (!( ["correct", "incorrect", "uncertain"] as const).includes(confirmation.verdict)) throw new Error("Homework verdict must be correct, incorrect, or uncertain.");
+    candidate.confirmedVerdict = confirmation.verdict;
+    candidate.stem = confirmation.stem?.trim() || candidate.stem;
+    if (confirmation.studentAnswer !== undefined) candidate.studentAnswer = confirmation.studentAnswer?.trim() || null;
+    const primary = confirmation.primaryKnowledgePoint?.trim() || candidate.suggestedPrimaryKnowledgePoint;
+    const secondary = (confirmation.secondaryKnowledgePoints ?? candidate.suggestedSecondaryKnowledgePoints).map((point) => point.trim()).filter(Boolean).slice(0, 2);
+    const cause = confirmation.mistakeCause?.trim() || candidate.suggestedMistakeCause;
+    if (confirmation.verdict === "incorrect") {
+      if (!primary) throw new Error("An incorrect homework question needs a confirmed primary knowledge point.");
+      const account = await this.asyncStore.findParentAccount(parentAccountId);
+      if (!account) throw new Error("Parent account was not found.");
+      const used = await this.asyncStore.countQuestionsSince(parentAccountId, shanghaiMonthStart(this.now()));
+      if (used >= PLAN_ENTITLEMENTS[account.plan].monthlyPhotoQuota) throw new Error(`本月拍题额度已用完（${PLAN_ENTITLEMENTS[account.plan].monthlyPhotoQuota} 道）；升级订阅可获得更高额度，或等待下月额度重置。`);
+      const question: ConfirmedQuestion = { id: randomUUID(), parentAccountId, childProfileId: review.childProfileId, source: "camera", stem: candidate.stem, formulas: [], imageKey: null, crop: null, rotationDegrees: 0, region: null, studentAnswer: candidate.studentAnswer, answerAnalysisSkipped: false, status: "confirmed", createdAt: this.now() };
+      await this.asyncStore.createQuestion(question);
+      const mistake: MistakeRecord = { id: randomUUID(), parentAccountId, childProfileId: review.childProfileId, questionId: question.id, primaryKnowledgePoint: primary, secondaryKnowledgePoints: secondary, mistakeCause: cause ?? null, masteryStatus: "not-started", createdAt: this.now() };
+      await this.asyncStore.createMistake(mistake);
+      await this.asyncStore.createReviewSchedule({ mistakeId: mistake.id, parentAccountId, childProfileId: review.childProfileId, intervalIndex: 0, nextReviewAt: shanghaiDayStartAfter(this.now(), REVIEW_INTERVAL_DAYS[0]), masteryScore: 0, reviewCount: 0 });
+      candidate.questionId = question.id; candidate.mistakeId = mistake.id;
+    } else if (confirmation.verdict === "correct") {
+      await this.asyncStore.createCorrectPracticeEvidence({ id: randomUUID(), parentAccountId, childProfileId: review.childProfileId, homeworkReviewId: review.id, knowledgePoint: primary, createdAt: this.now() });
+    }
+    await this.asyncStore.saveHomeworkReview(review);
+    return candidate;
+  }
+
+  private confirmGuardianship(parentAccountId: string): ParentAccount {
     const account = this.store.findParentAccount(parentAccountId);
 
     if (!account) {
@@ -1456,7 +1986,15 @@ export class LearningLoop {
     return account;
   }
 
-  setAnswerRevealPreference(
+  async confirmGuardianshipAsync(parentAccountId: string): Promise<ParentAccount> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    account.guardianshipConfirmed = true;
+    await this.asyncStore.saveParentAccount(account);
+    return account;
+  }
+
+  private setAnswerRevealPreference(
     parentAccountId: string,
     allowDirectAnswerReveal: boolean,
   ): ParentAccount {
@@ -1471,7 +2009,15 @@ export class LearningLoop {
     return account;
   }
 
-  grantSubscription(
+  async setAnswerRevealPreferenceAsync(parentAccountId: string, allowDirectAnswerReveal: boolean): Promise<ParentAccount> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    account.allowDirectAnswerReveal = allowDirectAnswerReveal;
+    await this.asyncStore.saveParentAccount(account);
+    return account;
+  }
+
+  private grantSubscription(
     parentAccountId: string,
     plan: SubscriptionPlan,
   ): ParentAccount {
@@ -1486,7 +2032,15 @@ export class LearningLoop {
     return account;
   }
 
-  getEntitlements(parentAccountId: string): EntitlementsView {
+  async grantSubscriptionAsync(parentAccountId: string, plan: SubscriptionPlan): Promise<ParentAccount> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    account.plan = plan;
+    await this.asyncStore.saveParentAccount(account);
+    return account;
+  }
+
+  private getEntitlements(parentAccountId: string): EntitlementsView {
     const account = this.store.findParentAccount(parentAccountId);
 
     if (!account) {
@@ -1509,7 +2063,14 @@ export class LearningLoop {
     };
   }
 
-  recordStudentAnswer(
+  async getEntitlementsAsync(parentAccountId: string): Promise<EntitlementsView> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    const monthStart = shanghaiMonthStart(this.now());
+    return { plan: account.plan, ...PLAN_ENTITLEMENTS[account.plan], photosUsedThisMonth: await this.asyncStore.countQuestionsSince(parentAccountId, monthStart), variantExercisesUsedThisMonth: await this.asyncStore.countVariantReviewsSince(parentAccountId, monthStart) };
+  }
+
+  private recordStudentAnswer(
     parentAccountId: string,
     questionId: string,
     entry: { answer?: string; skipAnalysis?: boolean },
@@ -1528,7 +2089,7 @@ export class LearningLoop {
     return question;
   }
 
-  saveMistake(
+  private saveMistake(
     parentAccountId: string,
     questionId: string,
     details: {
@@ -1591,7 +2152,7 @@ export class LearningLoop {
     return mistake;
   }
 
-  getReviewSchedule(
+  private getReviewSchedule(
     parentAccountId: string,
     mistakeId: string,
   ): ReviewScheduleView {
@@ -1616,7 +2177,7 @@ export class LearningLoop {
     };
   }
 
-  listChildProfiles(parentAccountId: string): ChildProfile[] {
+  private listChildProfiles(parentAccountId: string): ChildProfile[] {
     const account = this.store.findParentAccount(parentAccountId);
 
     if (!account) {
@@ -1626,7 +2187,13 @@ export class LearningLoop {
     return this.store.listChildProfiles(parentAccountId);
   }
 
-  getHomeOverview(parentAccountId: string): HomeOverview {
+  async listChildProfilesAsync(parentAccountId: string): Promise<ChildProfile[]> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    return await this.asyncStore.listChildProfiles(parentAccountId);
+  }
+
+  private getHomeOverview(parentAccountId: string): HomeOverview {
     const account = this.store.findParentAccount(parentAccountId);
 
     if (!account) {
@@ -1671,7 +2238,22 @@ export class LearningLoop {
     };
   }
 
-  getWeeklyReport(
+  async getSelectedChildProfileAsync(parentAccountId: string): Promise<ChildProfile | undefined> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    return await this.asyncStore.findSelectedChildProfile(parentAccountId);
+  }
+
+  async getHomeOverviewAsync(parentAccountId: string): Promise<HomeOverview> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId); if (!account) throw new Error("Parent account was not found.");
+    const profiles = await this.asyncStore.listChildProfiles(parentAccountId); const child = await this.asyncStore.findSelectedChildProfile(parentAccountId) ?? profiles[0];
+    if (!child) return { stage: "no-child-profile" };
+    const now = this.now(); const sevenDaysAgo = shanghaiDayStart(now) - 6 * DAY_MS;
+    const [dueReviews, mistakes, completedReviews] = await Promise.all([this.getDueReviewsAsync(parentAccountId, child.id), this.listMistakesAsync(parentAccountId, child.id), this.asyncStore.listCompletedReviewsSince(parentAccountId, child.id, 0)]);
+    return { stage: "ready", child, dueReviewCount: dueReviews.length, dueReviews, recentMistakes: mistakes.slice(-3).reverse(), sevenDaySummary: { newMistakes: mistakes.filter((entry) => entry.createdAt >= sevenDaysAgo).length, completedReviews: completedReviews.filter((review) => review.completedAt! >= sevenDaysAgo).length }, streakDays: shanghaiStreakDays(completedReviews.map((review) => review.completedAt!), now) };
+  }
+
+  private getWeeklyReport(
     parentAccountId: string,
     childProfileId: string,
   ): WeeklyReport {
@@ -1826,7 +2408,7 @@ export class LearningLoop {
     };
   }
 
-  updateReminderSettings(
+  private updateReminderSettings(
     parentAccountId: string,
     childProfileId: string,
     settings: { enabled: boolean; hourOfDay: number },
@@ -1852,7 +2434,7 @@ export class LearningLoop {
     return reminderSettings;
   }
 
-  getReminderSettings(
+  private getReminderSettings(
     parentAccountId: string,
     childProfileId: string,
   ): ReminderSettings | undefined {
@@ -1860,7 +2442,7 @@ export class LearningLoop {
     return this.store.findReminderSettings(parentAccountId, childProfileId);
   }
 
-  dispatchDueReminders(): ReminderDispatchOutcome[] {
+  private dispatchDueReminders(): ReminderDispatchOutcome[] {
     const now = this.now();
     const dateKey = shanghaiDateKey(now);
     const hourOfDay = shanghaiHour(now);
@@ -1911,7 +2493,7 @@ export class LearningLoop {
         if (!this.reminderSender) {
           throw new Error("Reminder channel is not configured.");
         }
-        this.reminderSender(notification);
+        this.reminderSender(notification, settings.parentAccountId);
       } catch {
         status = "failed";
       }
@@ -1930,7 +2512,7 @@ export class LearningLoop {
     return outcomes;
   }
 
-  getDueReviews(
+  private getDueReviews(
     parentAccountId: string,
     childProfileId: string,
   ): DueReview[] {
@@ -1962,7 +2544,7 @@ export class LearningLoop {
       .sort((a, b) => a.nextReviewAt - b.nextReviewAt);
   }
 
-  async startReview(
+  private async startReview(
     parentAccountId: string,
     mistakeId: string,
     options: { exercise?: "original" | "variant" } = {},
@@ -2040,7 +2622,7 @@ export class LearningLoop {
     };
   }
 
-  completeReview(
+  private completeReview(
     parentAccountId: string,
     reviewId: string,
     outcome: {
@@ -2141,7 +2723,7 @@ export class LearningLoop {
     };
   }
 
-  updateMistakeCause(
+  private updateMistakeCause(
     parentAccountId: string,
     mistakeId: string,
     mistakeCause: string,
@@ -2163,19 +2745,19 @@ export class LearningLoop {
     return mistake;
   }
 
-  deleteMistake(parentAccountId: string, mistakeId: string): void {
+  private deleteMistake(parentAccountId: string, mistakeId: string): void {
     const mistake = this.findMistakeForGuardian(parentAccountId, mistakeId);
 
     this.store.deleteMistake(parentAccountId, mistake.id);
     this.store.deleteQuestion(parentAccountId, mistake.questionId);
   }
 
-  deleteChildProfile(parentAccountId: string, childProfileId: string): void {
+  private deleteChildProfile(parentAccountId: string, childProfileId: string): void {
     this.findChildProfileForGuardian(parentAccountId, childProfileId);
     this.store.deleteChildProfile(parentAccountId, childProfileId);
   }
 
-  deleteParentAccount(parentAccountId: string): void {
+  private deleteParentAccount(parentAccountId: string): void {
     const account = this.store.findParentAccount(parentAccountId);
 
     if (!account) {
@@ -2185,7 +2767,7 @@ export class LearningLoop {
     this.store.deleteParentAccount(parentAccountId);
   }
 
-  listMistakes(
+  private listMistakes(
     parentAccountId: string,
     childProfileId: string,
     filters: MistakeFilters = {},
@@ -2255,7 +2837,7 @@ export class LearningLoop {
     return true;
   }
 
-  findDuplicateMistakes(
+  private findDuplicateMistakes(
     parentAccountId: string,
     childProfileId: string,
   ): MistakeBookEntry[][] {
@@ -2272,7 +2854,7 @@ export class LearningLoop {
     return [...groups.values()].filter((group) => group.length > 1);
   }
 
-  mergeMistakes(
+  private mergeMistakes(
     parentAccountId: string,
     keepMistakeId: string,
     duplicateMistakeId: string,
@@ -2330,13 +2912,17 @@ export class LearningLoop {
     questionId: string,
     options: { revealAnswer?: boolean } = {},
   ): Promise<Explanation> {
-    const account = this.store.findParentAccount(parentAccountId);
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
 
     if (!account) {
       throw new Error("Parent account was not found.");
     }
 
-    const question = this.findQuestionForGuardian(parentAccountId, questionId);
+    const question = await this.asyncStore.findQuestion(parentAccountId, questionId);
+
+    if (!question) {
+      throw new Error("Question is not available to this guardian.");
+    }
 
     if (!this.explanationProvider) {
       throw new Error("Explanation provider is not configured.");
@@ -2348,7 +2934,7 @@ export class LearningLoop {
       );
     }
 
-    const child = this.store.findChildProfile(
+    const child = await this.asyncStore.findChildProfile(
       parentAccountId,
       question.childProfileId,
     );
@@ -2391,7 +2977,7 @@ export class LearningLoop {
     };
   }
 
-  createChildProfile(
+  private createChildProfile(
     parentAccountId: string,
     profile: ChildProfileInput,
   ): ChildProfile {
@@ -2429,7 +3015,20 @@ export class LearningLoop {
     return childProfile;
   }
 
-  getSelectedChildProfile(parentAccountId: string): ChildProfile | undefined {
+  async createChildProfileAsync(parentAccountId: string, profile: ChildProfileInput): Promise<ChildProfile> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account?.guardianshipConfirmed) throw new Error("Guardianship confirmation is required before creating a child profile.");
+    const profiles = await this.asyncStore.listChildProfiles(parentAccountId);
+    const max = PLAN_ENTITLEMENTS[account.plan].maxChildProfiles;
+    if (profiles.length >= max) throw new Error(`孩子档案数量已达当前套餐上限（${max} 个）；升级订阅可建立更多孩子档案。`);
+    this.validateChildProfile(profile);
+    const childProfile: ChildProfile = { ...profile, ...(profile.region !== undefined ? { region: profile.region } : profile.location ? { region: this.displayRegion(profile.location) } : {}), id: randomUUID(), parentAccountId };
+    await this.asyncStore.createChildProfile(childProfile);
+    await this.asyncStore.selectChildProfile(parentAccountId, childProfile.id);
+    return childProfile;
+  }
+
+  private getSelectedChildProfile(parentAccountId: string): ChildProfile | undefined {
     const account = this.store.findParentAccount(parentAccountId);
 
     if (!account) {
@@ -2439,7 +3038,7 @@ export class LearningLoop {
     return this.store.findSelectedChildProfile(parentAccountId);
   }
 
-  updateChildProfile(
+  private updateChildProfile(
     parentAccountId: string,
     childProfileId: string,
     profile: ChildProfileInput,
@@ -2473,9 +3072,28 @@ export class LearningLoop {
     return updatedChildProfile;
   }
 
-  selectChildProfile(parentAccountId: string, childProfileId: string): void {
+  async updateChildProfileAsync(parentAccountId: string, childProfileId: string, profile: ChildProfileInput): Promise<ChildProfile> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    const child = await this.asyncStore.findChildProfile(parentAccountId, childProfileId);
+    if (!child) throw new Error("Child profile is not available to this guardian.");
+    this.validateChildProfile(profile);
+    const updated: ChildProfile = { ...child, ...profile, id: child.id, parentAccountId: child.parentAccountId,
+      ...(profile.location ? { location: { ...child.location, ...profile.location } } : {}),
+      ...(profile.region !== undefined ? { region: profile.region } : profile.location ? { region: this.displayRegion(profile.location) } : {}) };
+    await this.asyncStore.saveChildProfile(updated);
+    return updated;
+  }
+
+  private selectChildProfile(parentAccountId: string, childProfileId: string): void {
     this.findChildProfileForGuardian(parentAccountId, childProfileId);
     this.store.selectChildProfile(parentAccountId, childProfileId);
+  }
+
+  async selectChildProfileAsync(parentAccountId: string, childProfileId: string): Promise<void> {
+    const child = await this.asyncStore.findChildProfile(parentAccountId, childProfileId);
+    if (!child) throw new Error("Child profile is not available to this guardian.");
+    await this.asyncStore.selectChildProfile(parentAccountId, childProfileId);
   }
 
   private findChildProfileForGuardian(
@@ -2551,6 +3169,46 @@ export class LearningLoop {
       throw new Error("Homework review is not available to this guardian.");
     }
     return review;
+  }
+
+  private async findQuestionForGuardianAsync(parentAccountId: string, questionId: string): Promise<ConfirmedQuestion> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    const question = this.findQuestionForGuardian(parentAccountId, questionId);
+    if (!question) throw new Error("Question is not available to this guardian.");
+    return question;
+  }
+
+  private async findHomeworkReviewForGuardianAsync(parentAccountId: string, homeworkReviewId: string): Promise<HomeworkReview> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    const review = await this.asyncStore.findHomeworkReview(parentAccountId, homeworkReviewId);
+    if (!review) throw new Error("Homework review is not available to this guardian.");
+    return review;
+  }
+
+  private async findMistakeForGuardianAsync(parentAccountId: string, mistakeId: string): Promise<MistakeRecord> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    const mistake = await this.asyncStore.findMistake(parentAccountId, mistakeId);
+    if (!mistake) throw new Error("Mistake record is not available to this guardian.");
+    return mistake;
+  }
+
+  private async findChildProfileForGuardianAsync(parentAccountId: string, childProfileId: string): Promise<ChildProfile> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    const child = await this.asyncStore.findChildProfile(parentAccountId, childProfileId);
+    if (!child) throw new Error("Child profile is not available to this guardian.");
+    return child;
+  }
+
+  private async findQuestionDraftForGuardianAsync(parentAccountId: string, draftId: string): Promise<QuestionDraft> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    const draft = await this.asyncStore.findQuestionDraft(parentAccountId, draftId);
+    if (!draft) throw new Error("Question draft is not available to this guardian.");
+    return draft;
   }
 
   private validateCropRegion(crop: CropRegion): void {

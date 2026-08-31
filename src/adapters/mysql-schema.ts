@@ -156,6 +156,18 @@ const schemaStatements = [
     INDEX correct_practice_evidence_owner
       (parent_account_id, child_profile_id, created_at)
   ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS idempotency_records (
+    parent_account_id CHAR(36) NOT NULL,
+    operation_name VARCHAR(64) NOT NULL,
+    idempotency_key VARCHAR(128) NOT NULL,
+    state VARCHAR(16) NOT NULL,
+    response_json JSON NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (parent_account_id, operation_name, idempotency_key),
+    CONSTRAINT idempotency_records_parent_account
+      FOREIGN KEY (parent_account_id) REFERENCES parent_accounts(id)
+      ON DELETE CASCADE
+  ) ENGINE=InnoDB`,
 ] as const;
 
 export async function migrateMysqlSchema(pool: Pool): Promise<void> {

@@ -9,12 +9,16 @@
   "scripts": {
     "test": "tsx --test test/**/*.test.ts",
     "check": "tsc --noEmit",
+    "preflight": "npm run check && npm test && node --check miniprogram/config.js && node --check miniprogram/services/api.js && node --check miniprogram/pages/capture/capture.js && node --check miniprogram/pages/settings/settings.js && git diff --check",
     "configure:miniprogram": "node scripts/configure-miniprogram.mjs",
+    "accept:mysql": "tsx scripts/check-mysql-acceptance.ts",
+    "accept:mysql-loop": "tsx scripts/mysql-learning-loop-acceptance.ts",
     "start": "tsx src/server/start.ts"
   },
   "dependencies": {
     "@cloudbase/node-sdk": "^3.18.3",
-    "better-sqlite3": "^13.0.3"
+    "better-sqlite3": "^13.0.3",
+    "mysql2": "^3.24.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

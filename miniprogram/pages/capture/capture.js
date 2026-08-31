@@ -94,6 +94,7 @@ Page({
         {
           uploadToken: credential.uploadToken,
           fileId: upload.fileID,
+          imageKey: credential.imageKey,
           imageUrl: temporaryFile.tempFileURL,
         },
       );

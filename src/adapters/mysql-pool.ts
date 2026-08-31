@@ -55,6 +55,10 @@ export function createMysqlPool(config: MysqlConnectionConfig): Pool {
   return createPool(options);
 }
 
+export function validateProductionMysqlConfig(config: MysqlConnectionConfig, cloudHosting: boolean): void {
+  if (cloudHosting && !config.ssl) throw new Error("MYSQL_SSL must remain enabled in Cloud Hosting.");
+}
+
 export async function verifyMysqlPool(pool: Pool): Promise<void> {
   const connection = await pool.getConnection();
   try {

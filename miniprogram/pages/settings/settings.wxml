@@ -87,5 +87,12 @@
         升级订阅（调试入口）
       </button>
     </view>
+
+    <view class="card">
+      <view class="card-title">隐私与数据</view>
+      <view class="muted">题目照片仅用于识别与讲解，未经独立授权不用于模型训练。</view>
+      <view class="muted" style="margin-top: 8rpx">需要帮助可通过小程序客服联系我们。</view>
+      <button class="btn btn-danger" bindtap="deleteAccount">注销账户并删除全部数据</button>
+    </view>
   </block>
 </view>

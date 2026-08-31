@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { readMysqlConnectionConfig } from "../src/adapters/mysql-pool.ts";
+import { readMysqlConnectionConfig, validateProductionMysqlConfig } from "../src/adapters/mysql-pool.ts";
+
+test("cloud hosting rejects MySQL with TLS disabled", () => {
+  assert.throws(() => validateProductionMysqlConfig({ host: "h", port: 3306, database: "d", user: "u", password: "p", ssl: false }, true), /MYSQL_SSL/);
+  validateProductionMysqlConfig({ host: "h", port: 3306, database: "d", user: "u", password: "p", ssl: true }, true);
+});
 
 test("MySQL configuration is absent only when every required value is absent", () => {
   assert.equal(readMysqlConnectionConfig({}), undefined);

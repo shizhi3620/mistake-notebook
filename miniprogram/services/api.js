@@ -20,17 +20,27 @@ function login() {
 }
 
 function request(method, path, body, options = {}) {
+  const mutating = method !== "GET";
+  const idempotencyKey = options.idempotencyKey || (mutating
+    ? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    : "");
   return new Promise((resolve, reject) => {
     wx.request({
       url: config.apiBase + path,
       method,
       data: body,
-      header: token ? { authorization: `Bearer ${token}` } : {},
+      header: {
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+      },
       success: (res) => {
         if (res.statusCode === 401 && !options.skipAuth && !options.retried) {
           login()
             .then(() =>
-              resolve(request(method, path, body, { retried: true })),
+              resolve(request(method, path, body, {
+                retried: true,
+                idempotencyKey,
+              })),
             )
             .catch(reject);
           return;
@@ -46,7 +56,13 @@ function request(method, path, body, options = {}) {
   });
 }
 
+function clearSession() {
+  token = "";
+  wx.removeStorageSync("sessionToken");
+}
+
 module.exports = {
+  clearSession,
   login,
   request,
 };

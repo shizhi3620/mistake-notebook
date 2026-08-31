@@ -1,4 +1,5 @@
 const api = require("../../services/api");
+const config = require("../../config");
 const provinceOptions = require("../../services/provinces");
 
 Page({
@@ -198,7 +199,29 @@ Page({
   },
 
   async toggleReminder(event) {
-    this.setData({ reminderEnabled: event.detail.value });
+    const enabled = event.detail.value;
+    if (enabled) {
+      if (!config.reminderTemplateId) {
+        this.setData({ reminderEnabled: false });
+        wx.showToast({ title: "提醒模板尚未配置", icon: "none" });
+        return;
+      }
+      try {
+        const result = await wx.requestSubscribeMessage({
+          tmplIds: [config.reminderTemplateId],
+        });
+        if (result[config.reminderTemplateId] !== "accept") {
+          this.setData({ reminderEnabled: false });
+          wx.showToast({ title: "未授权提醒，已保持关闭", icon: "none" });
+          return;
+        }
+      } catch {
+        this.setData({ reminderEnabled: false });
+        wx.showToast({ title: "提醒授权失败，已保持关闭", icon: "none" });
+        return;
+      }
+    }
+    this.setData({ reminderEnabled: enabled });
     await this.saveReminder();
   },
 
@@ -237,5 +260,24 @@ Page({
     } catch (error) {
       wx.showToast({ title: error.message, icon: "none" });
     }
+  },
+
+  deleteAccount() {
+    wx.showModal({
+      title: "注销家长账户？",
+      content: "所有孩子档案、错题、复习记录和学习数据将被删除，无法恢复。",
+      confirmColor: "#d83931",
+      success: async (res) => {
+        if (!res.confirm) return;
+        try {
+          await api.request("DELETE", "/account");
+          api.clearSession();
+          getApp().globalData.account = null;
+          wx.reLaunch({ url: "/pages/home/home" });
+        } catch (error) {
+          wx.showToast({ title: error.message, icon: "none" });
+        }
+      },
+    });
   },
 });

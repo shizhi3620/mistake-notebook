@@ -8,13 +8,13 @@ import {
   type ReminderNotification,
 } from "../src/learning-loop.ts";
 
-function confirmedGuardianWithChild(learningLoop: LearningLoop): {
+async function confirmedGuardianWithChild(learningLoop: LearningLoop): Promise<{
   guardian: ParentAccount;
   child: ChildProfile;
-} {
-  const guardian = learningLoop.startWeChatLogin("guardian-code").account;
-  learningLoop.confirmGuardianship(guardian.id);
-  const child = learningLoop.createChildProfile(guardian.id, {
+}> {
+  const guardian = (await learningLoop.startWeChatLoginAsync("guardian-code")).account;
+  await learningLoop.confirmGuardianshipAsync(guardian.id);
+  const child = await learningLoop.createChildProfileAsync(guardian.id, {
     nickname: "小明",
     grade: 3,
     region: "浙江",
@@ -22,21 +22,21 @@ function confirmedGuardianWithChild(learningLoop: LearningLoop): {
   return { guardian, child };
 }
 
-function saveDueMistake(
+async function saveDueMistake(
   learningLoop: LearningLoop,
   guardian: ParentAccount,
   child: ChildProfile,
   stem = "3 + 5 = ?",
-): void {
-  const draft = learningLoop.startQuestionDraft(guardian.id, child.id, "manual");
-  const question = learningLoop.confirmQuestion(guardian.id, draft.id, { stem });
-  learningLoop.saveMistake(guardian.id, question.id, {
+): Promise<void> {
+  const draft = await learningLoop.startQuestionDraftAsync(guardian.id, child.id, "manual");
+  const question = await learningLoop.confirmQuestionAsync(guardian.id, draft.id, { stem });
+  await learningLoop.saveMistakeAsync(guardian.id, question.id, {
     primaryKnowledgePoint: "20以内进位加法",
     mistakeCause: "粗心",
   });
 }
 
-test("reminders are opt-in and send at most one privacy-safe notification per child per day", () => {
+test("reminders are opt-in and send at most one privacy-safe notification per child per day", async () => {
   // Mistake saved 2026-08-27, due 2026-08-28 (Shanghai).
   let now = Date.parse("2026-08-27T10:00:00+08:00");
   const sent: ReminderNotification[] = [];
@@ -46,14 +46,14 @@ test("reminders are opt-in and send at most one privacy-safe notification per ch
       sent.push(notification);
     },
   });
-  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
-  saveDueMistake(learningLoop, guardian, child);
+  const { guardian, child } = await confirmedGuardianWithChild(learningLoop);
+  await saveDueMistake(learningLoop, guardian, child);
 
   now = Date.parse("2026-08-28T09:00:00+08:00");
-  learningLoop.dispatchDueReminders();
+  await learningLoop.dispatchDueRemindersAsync();
   assert.equal(sent.length, 0);
 
-  const settings = learningLoop.updateReminderSettings(
+  const settings = await learningLoop.updateReminderSettingsAsync(
     guardian.id,
     child.id,
     { enabled: true, hourOfDay: 8 },
@@ -61,11 +61,11 @@ test("reminders are opt-in and send at most one privacy-safe notification per ch
   assert.equal(settings.enabled, true);
 
   now = Date.parse("2026-08-28T07:00:00+08:00");
-  learningLoop.dispatchDueReminders();
+  await learningLoop.dispatchDueRemindersAsync();
   assert.equal(sent.length, 0);
 
   now = Date.parse("2026-08-28T09:00:00+08:00");
-  learningLoop.dispatchDueReminders();
+  await learningLoop.dispatchDueRemindersAsync();
   assert.equal(sent.length, 1);
   assert.deepEqual(sent[0], {
     childNickname: "小明",
@@ -75,15 +75,15 @@ test("reminders are opt-in and send at most one privacy-safe notification per ch
   assert.equal(JSON.stringify(sent[0]).includes("3 + 5"), false);
   assert.equal(JSON.stringify(sent[0]).includes("粗心"), false);
 
-  learningLoop.dispatchDueReminders();
+  await learningLoop.dispatchDueRemindersAsync();
   assert.equal(sent.length, 1);
 
   now = Date.parse("2026-08-29T09:00:00+08:00");
-  learningLoop.dispatchDueReminders();
+  await learningLoop.dispatchDueRemindersAsync();
   assert.equal(sent.length, 2);
 });
 
-test("failed or unavailable sends are not retried and never touch review state", () => {
+test("failed or unavailable sends are not retried and never touch review state", async () => {
   let now = Date.parse("2026-08-27T10:00:00+08:00");
   let attempts = 0;
   const learningLoop = new LearningLoop(undefined, {
@@ -93,47 +93,64 @@ test("failed or unavailable sends are not retried and never touch review state",
       throw new Error("template unavailable");
     },
   });
-  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
-  saveDueMistake(learningLoop, guardian, child);
-  learningLoop.updateReminderSettings(guardian.id, child.id, {
+  const { guardian, child } = await confirmedGuardianWithChild(learningLoop);
+  await saveDueMistake(learningLoop, guardian, child);
+  await learningLoop.updateReminderSettingsAsync(guardian.id, child.id, {
     enabled: true,
     hourOfDay: 8,
   });
 
   now = Date.parse("2026-08-28T09:00:00+08:00");
-  const outcomes = learningLoop.dispatchDueReminders();
+  const outcomes = await learningLoop.dispatchDueRemindersAsync();
 
   assert.deepEqual(outcomes, [{ childProfileId: child.id, status: "failed" }]);
   assert.equal(attempts, 1);
 
-  const retry = learningLoop.dispatchDueReminders();
+  const retry = await learningLoop.dispatchDueRemindersAsync();
   assert.deepEqual(retry, []);
   assert.equal(attempts, 1);
 
-  assert.equal(learningLoop.getDueReviews(guardian.id, child.id).length, 1);
+  assert.equal((await learningLoop.getDueReviewsAsync(guardian.id, child.id)).length, 1);
 
   let silentNow = Date.parse("2026-08-27T10:00:00+08:00");
   const silent = new LearningLoop(undefined, {
     now: () => silentNow,
   });
-  const silentFamily = confirmedGuardianWithChild(silent);
-  saveDueMistake(silent, silentFamily.guardian, silentFamily.child);
-  silent.updateReminderSettings(silentFamily.guardian.id, silentFamily.child.id, {
+  const silentFamily = await confirmedGuardianWithChild(silent);
+  await saveDueMistake(silent, silentFamily.guardian, silentFamily.child);
+  await silent.updateReminderSettingsAsync(silentFamily.guardian.id, silentFamily.child.id, {
     enabled: true,
     hourOfDay: 8,
   });
   silentNow = Date.parse("2026-08-28T09:00:00+08:00");
-  assert.deepEqual(silent.dispatchDueReminders(), [
+  assert.deepEqual(await silent.dispatchDueRemindersAsync(), [
     { childProfileId: silentFamily.child.id, status: "failed" },
   ]);
   assert.equal(
-    silent.getDueReviews(silentFamily.guardian.id, silentFamily.child.id)
-      .length,
+    (await silent.getDueReviewsAsync(silentFamily.guardian.id, silentFamily.child.id)).length,
     1,
   );
 });
 
-test("disabling reminders or deleting the profile stops them immediately", () => {
+test("async reminder sender failures are recorded instead of being treated as success", async () => {
+  let now = Date.parse("2026-08-30T10:00:00+08:00");
+  const learningLoop = new LearningLoop(undefined, {
+    now: () => now,
+    reminderSender: async () => { throw new Error("wechat unavailable"); },
+  });
+  const account = (await learningLoop.startWeChatLoginAsync("async-reminder")).account;
+  await learningLoop.confirmGuardianshipAsync(account.id);
+  const child = await learningLoop.createChildProfileAsync(account.id, { nickname: "小明", grade: 3 });
+  const draft = await learningLoop.startQuestionDraftAsync(account.id, child.id, "manual");
+  const question = await learningLoop.confirmQuestionAsync(account.id, draft.id, { stem: "1+1=?" });
+  await learningLoop.saveMistakeAsync(account.id, question.id, { primaryKnowledgePoint: "加法" });
+  await learningLoop.updateReminderSettingsAsync(account.id, child.id, { enabled: true, hourOfDay: 9 });
+  now += 2 * 24 * 60 * 60 * 1000;
+  const outcomes = await learningLoop.dispatchDueRemindersAsync();
+  assert.deepEqual(outcomes, [{ childProfileId: child.id, status: "failed" }]);
+});
+
+test("disabling reminders or deleting the profile stops them immediately", async () => {
   let now = Date.parse("2026-08-27T10:00:00+08:00");
   const sent: ReminderNotification[] = [];
   const learningLoop = new LearningLoop(undefined, {
@@ -142,40 +159,40 @@ test("disabling reminders or deleting the profile stops them immediately", () =>
       sent.push(notification);
     },
   });
-  const { guardian, child } = confirmedGuardianWithChild(learningLoop);
-  const otherChild = learningLoop.createChildProfile(guardian.id, {
+  const { guardian, child } = await confirmedGuardianWithChild(learningLoop);
+  const otherChild = await learningLoop.createChildProfileAsync(guardian.id, {
     nickname: "小红",
     grade: 6,
     region: "上海",
   });
-  saveDueMistake(learningLoop, guardian, child);
-  saveDueMistake(learningLoop, guardian, otherChild, "2x = 10");
-  learningLoop.updateReminderSettings(guardian.id, child.id, {
+  await saveDueMistake(learningLoop, guardian, child);
+  await saveDueMistake(learningLoop, guardian, otherChild, "2x = 10");
+  await learningLoop.updateReminderSettingsAsync(guardian.id, child.id, {
     enabled: true,
     hourOfDay: 8,
   });
-  learningLoop.updateReminderSettings(guardian.id, otherChild.id, {
+  await learningLoop.updateReminderSettingsAsync(guardian.id, otherChild.id, {
     enabled: true,
     hourOfDay: 8,
   });
 
-  learningLoop.updateReminderSettings(guardian.id, child.id, {
+  await learningLoop.updateReminderSettingsAsync(guardian.id, child.id, {
     enabled: false,
     hourOfDay: 8,
   });
 
   now = Date.parse("2026-08-28T09:00:00+08:00");
-  learningLoop.dispatchDueReminders();
+  await learningLoop.dispatchDueRemindersAsync();
   assert.equal(sent.length, 1);
   assert.equal(sent[0]?.childNickname, "小红");
 
-  learningLoop.deleteChildProfile(guardian.id, otherChild.id);
+  await learningLoop.deleteChildProfileAsync(guardian.id, otherChild.id);
   assert.equal(
-    learningLoop.getReminderSettings(guardian.id, child.id)?.enabled,
+    (await learningLoop.getReminderSettingsAsync(guardian.id, child.id))?.enabled,
     false,
   );
 
   now = Date.parse("2026-08-29T09:00:00+08:00");
-  learningLoop.dispatchDueReminders();
+  await learningLoop.dispatchDueRemindersAsync();
   assert.equal(sent.length, 1);
 });
