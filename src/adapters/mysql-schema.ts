@@ -168,6 +168,19 @@ const schemaStatements = [
       FOREIGN KEY (parent_account_id) REFERENCES parent_accounts(id)
       ON DELETE CASCADE
   ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS feedback (
+    id CHAR(36) PRIMARY KEY,
+    parent_account_id CHAR(36) NOT NULL,
+    child_profile_id CHAR(36) NULL,
+    question_id CHAR(36) NULL,
+    type VARCHAR(32) NOT NULL,
+    payload_json JSON NOT NULL,
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL,
+    INDEX feedback_owner_created (parent_account_id, created_at),
+    INDEX feedback_priority (parent_account_id, type, created_at),
+    CONSTRAINT feedback_parent_account FOREIGN KEY (parent_account_id) REFERENCES parent_accounts(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`,
 ] as const;
 
 export async function migrateMysqlSchema(pool: Pool): Promise<void> {

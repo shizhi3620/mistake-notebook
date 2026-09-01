@@ -4,6 +4,7 @@ import type {
   ChildProfile,
   ConfirmedQuestion,
   CorrectPracticeEvidence,
+  FeedbackRecord,
   HomeworkReview,
   LearningLoopStore,
   LoginSession,
@@ -79,6 +80,7 @@ type QuestionRow = {
   status: string;
   created_at: number;
 };
+type FeedbackRow = FeedbackRecord & { parent_account_id: string };
 
 type MistakeRow = {
   id: string;
@@ -281,6 +283,9 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
         homework_review_id TEXT NOT NULL,
         knowledge_point TEXT,
         created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS feedback (
+        id TEXT PRIMARY KEY, parent_account_id TEXT NOT NULL, payload_json TEXT NOT NULL
       );
     `);
     this.migrateChildProfileLocations();
@@ -1354,6 +1359,11 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
       )
       .run(childProfileId, parentAccountId, childProfileId, parentAccountId);
   }
+
+  createFeedback(feedback: FeedbackRecord): void { this.database.prepare("INSERT INTO feedback (id,parent_account_id,payload_json) VALUES (?,?,?)").run(feedback.id, feedback.parentAccountId, JSON.stringify(feedback)); }
+  findFeedback(parentAccountId: string, feedbackId: string): FeedbackRecord | undefined { const row = this.database.prepare("SELECT payload_json FROM feedback WHERE id=? AND parent_account_id=?").get(feedbackId, parentAccountId) as { payload_json: string } | undefined; return row ? JSON.parse(row.payload_json) as FeedbackRecord : undefined; }
+  listFeedback(parentAccountId: string): FeedbackRecord[] { const rows = this.database.prepare("SELECT payload_json FROM feedback WHERE parent_account_id=? ORDER BY rowid").all(parentAccountId) as { payload_json: string }[]; return rows.map((row) => JSON.parse(row.payload_json) as FeedbackRecord); }
+  saveFeedback(feedback: FeedbackRecord): void { this.database.prepare("UPDATE feedback SET payload_json=? WHERE id=? AND parent_account_id=?").run(JSON.stringify(feedback), feedback.id, feedback.parentAccountId); }
 
   close(): void {
     this.database.close();

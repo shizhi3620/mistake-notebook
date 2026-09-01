@@ -157,6 +157,30 @@ export type Explanation = {
   suggestedMistakeCause: string | null;
 };
 
+export type FeedbackType = "explanation_quality" | "feature" | "safety";
+export type FeedbackStatus = "new" | "reviewing" | "resolved" | "rejected";
+export type FeedbackRecord = {
+  id: string;
+  parentAccountId: string;
+  childProfileId: string | null;
+  questionId: string | null;
+  explanationVersion: string | null;
+  modelVersion: string | null;
+  requestVersion: string | null;
+  type: FeedbackType;
+  outcome: "helpful" | "problematic" | null;
+  issueKinds: string[];
+  featureKind: "usability" | "operation_failure" | "feature_request" | "other" | null;
+  page: string | null;
+  clientVersion: string | null;
+  note: string | null;
+  status: FeedbackStatus;
+  priority: "normal" | "high";
+  internalNote: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type MistakeRecord = {
   id: string;
   parentAccountId: string;
@@ -459,6 +483,10 @@ export interface LearningLoopStore {
   saveChildProfile(profile: ChildProfile): void;
   findSelectedChildProfile(parentAccountId: string): ChildProfile | undefined;
   selectChildProfile(parentAccountId: string, childProfileId: string): void;
+  createFeedback(feedback: FeedbackRecord): void;
+  findFeedback(parentAccountId: string, feedbackId: string): FeedbackRecord | undefined;
+  listFeedback(parentAccountId: string): FeedbackRecord[];
+  saveFeedback(feedback: FeedbackRecord): void;
 }
 
 export type AsyncLearningLoopStore = {
@@ -499,6 +527,7 @@ class InMemoryLearningLoopStore implements LearningLoopStore {
   private readonly homeworkReviews = new Map<string, HomeworkReview>();
   private readonly correctPracticeEvidence = new Map<string, CorrectPracticeEvidence>();
   private readonly selectedChildProfileIds = new Map<string, string>();
+  private readonly feedback = new Map<string, FeedbackRecord>();
 
   createParentAccount(account: ParentAccount): void {
     this.accounts.set(account.id, account);
@@ -927,6 +956,11 @@ class InMemoryLearningLoopStore implements LearningLoopStore {
   selectChildProfile(parentAccountId: string, childProfileId: string): void {
     this.selectedChildProfileIds.set(parentAccountId, childProfileId);
   }
+
+  createFeedback(feedback: FeedbackRecord): void { this.feedback.set(feedback.id, feedback); }
+  findFeedback(parentAccountId: string, feedbackId: string): FeedbackRecord | undefined { const item = this.feedback.get(feedbackId); return item?.parentAccountId === parentAccountId ? item : undefined; }
+  listFeedback(parentAccountId: string): FeedbackRecord[] { return [...this.feedback.values()].filter((item) => item.parentAccountId === parentAccountId); }
+  saveFeedback(feedback: FeedbackRecord): void { this.feedback.set(feedback.id, feedback); }
 }
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -2975,6 +3009,58 @@ export class LearningLoop {
           .slice(0, 2) ?? [],
       suggestedMistakeCause: content.suggestedMistakeCause?.trim() || null,
     };
+  }
+
+  async submitFeedbackAsync(parentAccountId: string, input: {
+    type: FeedbackType;
+    questionId?: string;
+    explanationVersion?: string;
+    modelVersion?: string;
+    requestVersion?: string;
+    outcome?: "helpful" | "problematic";
+    issueKinds?: string[];
+    featureKind?: FeedbackRecord["featureKind"];
+    page?: string;
+    clientVersion?: string;
+    note?: string;
+  }): Promise<FeedbackRecord> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    if (!["explanation_quality", "feature", "safety"].includes(input.type)) throw new Error("Invalid feedback type.");
+    const note = input.note?.trim() || null;
+    if (note && (note.length < 1 || note.length > 500)) throw new Error("Feedback note must be 1-500 characters.");
+    if (input.type === "explanation_quality" || input.type === "safety") {
+      if (!input.questionId) throw new Error("Feedback requires a question.");
+      const question = await this.asyncStore.findQuestion(parentAccountId, input.questionId);
+      if (!question) throw new Error("Question is not available to this guardian.");
+      if (input.type === "safety" && !note) throw new Error("Safety feedback requires a note.");
+      if (input.type === "explanation_quality" && !input.outcome) throw new Error("Explanation feedback requires an outcome.");
+      if (input.outcome === "problematic" && (!input.issueKinds?.length || input.issueKinds.some((kind) => !["question_text", "answer", "explanation", "difficulty"].includes(kind)))) throw new Error("Invalid explanation feedback issue.");
+      const feedback: FeedbackRecord = { id: randomUUID(), parentAccountId, childProfileId: question.childProfileId, questionId: question.id, explanationVersion: input.explanationVersion?.trim() || null, modelVersion: input.modelVersion?.trim() || null, requestVersion: input.requestVersion?.trim() || null, type: input.type, outcome: input.outcome ?? null, issueKinds: input.issueKinds ?? [], featureKind: null, page: null, clientVersion: input.clientVersion?.trim() || null, note, status: "new", priority: input.type === "safety" ? "high" : "normal", internalNote: null, createdAt: this.now(), updatedAt: this.now() };
+      await this.asyncStore.createFeedback(feedback);
+      return feedback;
+    }
+    if (!input.featureKind) throw new Error("Feature feedback requires a category.");
+    const feedback: FeedbackRecord = { id: randomUUID(), parentAccountId, childProfileId: null, questionId: null, explanationVersion: null, modelVersion: null, requestVersion: null, type: "feature", outcome: null, issueKinds: [], featureKind: input.featureKind, page: input.page?.trim() || null, clientVersion: input.clientVersion?.trim() || null, note, status: "new", priority: "normal", internalNote: null, createdAt: this.now(), updatedAt: this.now() };
+    await this.asyncStore.createFeedback(feedback);
+    return feedback;
+  }
+
+  async updateFeedbackAsync(parentAccountId: string, feedbackId: string, input: { status?: FeedbackStatus; internalNote?: string | null }): Promise<FeedbackRecord> {
+    const feedback = await this.asyncStore.findFeedback(parentAccountId, feedbackId);
+    if (!feedback) throw new Error("Feedback is not available to this guardian.");
+    if (input.status && !["new", "reviewing", "resolved", "rejected"].includes(input.status)) throw new Error("Invalid feedback status.");
+    if (input.internalNote !== undefined) feedback.internalNote = input.internalNote?.trim() || null;
+    if (input.status) feedback.status = input.status;
+    feedback.updatedAt = this.now();
+    await this.asyncStore.saveFeedback(feedback);
+    return feedback;
+  }
+
+  async listFeedbackAsync(parentAccountId: string): Promise<FeedbackRecord[]> {
+    const account = await this.asyncStore.findParentAccount(parentAccountId);
+    if (!account) throw new Error("Parent account was not found.");
+    return this.asyncStore.listFeedback(parentAccountId);
   }
 
   private createChildProfile(

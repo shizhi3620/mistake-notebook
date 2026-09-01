@@ -220,6 +220,21 @@ export function createLearningLoopServer(
     if (method === "GET" && route === "/entitlements") {
       return send(response, 200, await learningLoop.getEntitlementsAsync(auth));
     }
+    if (method === "POST" && route === "/feedback") {
+      return sendIdempotent(request, response, auth, "submit-feedback", () => learningLoop.submitFeedbackAsync(auth, {
+        type: body?.type,
+        questionId: body?.questionId,
+        explanationVersion: body?.explanationVersion,
+        modelVersion: body?.modelVersion,
+        requestVersion: body?.requestVersion,
+        outcome: body?.outcome,
+        issueKinds: body?.issueKinds,
+        featureKind: body?.featureKind,
+        page: body?.page,
+        clientVersion: body?.clientVersion,
+        note: body?.note,
+      }));
+    }
     if (method === "DELETE" && route === "/account") {
       await learningLoop.deleteParentAccountAsync(auth);
       return send(response, 200, { ok: true });

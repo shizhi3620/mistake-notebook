@@ -3,6 +3,7 @@ import type {
   ChildProfile,
   ConfirmedQuestion,
   CorrectPracticeEvidence,
+  FeedbackRecord,
   HomeworkReview,
   AsyncLearningLoopStore,
   LoginSession,
@@ -141,6 +142,10 @@ export class MysqlLearningLoopStore implements AsyncLearningLoopStore {
   async saveHomeworkReview(v:HomeworkReview):Promise<void>{await this.pool.execute("UPDATE homework_reviews SET image_key=?,candidates_json=? WHERE id=? AND parent_account_id=?",[v.imageKey,JSON.stringify(v.candidates),v.id,v.parentAccountId]);}
   async createCorrectPracticeEvidence(v:CorrectPracticeEvidence):Promise<void>{await this.pool.execute("INSERT INTO correct_practice_evidence (id,parent_account_id,child_profile_id,homework_review_id,knowledge_point,created_at) VALUES (?,?,?,?,?,?)",[v.id,v.parentAccountId,v.childProfileId,v.homeworkReviewId,v.knowledgePoint,v.createdAt]);}
   async listCorrectPracticeEvidence(parentAccountId:string,childProfileId:string):Promise<CorrectPracticeEvidence[]>{const [rows]=await this.pool.query<(RowDataPacket & Record<string,unknown>)[]>("SELECT * FROM correct_practice_evidence WHERE parent_account_id=? AND child_profile_id=? ORDER BY created_at",[parentAccountId,childProfileId]);return rows.map((r)=>({id:String(r.id),parentAccountId:String(r.parent_account_id),childProfileId:String(r.child_profile_id),homeworkReviewId:String(r.homework_review_id),knowledgePoint:r.knowledge_point as string|null,createdAt:Number(r.created_at)}));}
+  async createFeedback(v: FeedbackRecord): Promise<void> { await this.pool.execute("INSERT INTO feedback (id,parent_account_id,child_profile_id,question_id,type,payload_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)", [v.id,v.parentAccountId,v.childProfileId,v.questionId,v.type,JSON.stringify(v),v.createdAt,v.updatedAt]); }
+  async findFeedback(parentAccountId: string, id: string): Promise<FeedbackRecord | undefined> { const row = await this.one<RowDataPacket & { payload_json: string }>("SELECT payload_json FROM feedback WHERE id=? AND parent_account_id=?", [id,parentAccountId]); return row ? JSON.parse(row.payload_json) as FeedbackRecord : undefined; }
+  async listFeedback(parentAccountId: string): Promise<FeedbackRecord[]> { const [rows] = await this.pool.query<(RowDataPacket & { payload_json: string })[]>("SELECT payload_json FROM feedback WHERE parent_account_id=? ORDER BY created_at", [parentAccountId]); return rows.map((row) => JSON.parse(row.payload_json) as FeedbackRecord); }
+  async saveFeedback(v: FeedbackRecord): Promise<void> { await this.pool.execute("UPDATE feedback SET payload_json=?,updated_at=? WHERE id=? AND parent_account_id=?", [JSON.stringify(v),v.updatedAt,v.id,v.parentAccountId]); }
 
   /** Atomically creates the account and its platform identity during first login. */
   async createParentAccountWithWeChatSubject(account: ParentAccount, subject: string): Promise<void> {
