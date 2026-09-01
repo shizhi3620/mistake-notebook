@@ -40,6 +40,7 @@ export type LearningLoopServerDependencies = {
   maxAiRequestsPerMonth?: number;
   reminderSchedulerSecret?: string;
   feedbackOperatorSecret?: string;
+  feedbackOperatorId?: string;
   idempotencyStore?: IdempotencyStore;
 };
 
@@ -196,14 +197,18 @@ export function createLearningLoopServer(
         return;
       }
       const internalRoute = path.replace(/^\/internal/, "");
-      const internalBody = await readJsonBody(request);
       if (method === "GET" && internalRoute === "/feedback") {
-        await send(response, 200, await learningLoop.listAllFeedbackAsync());
+        await send(response, 200, await learningLoop.listAllFeedbackAsync({
+          type: url.searchParams.get("type") as "explanation_quality" | "feature" | "safety" | null ?? undefined,
+          priority: url.searchParams.get("priority") as "normal" | "high" | null ?? undefined,
+          status: url.searchParams.get("status") as "new" | "reviewing" | "resolved" | "rejected" | null ?? undefined,
+        }));
         return;
       }
       const internalMatch = match(internalRoute, "/feedback/:id");
       if (method === "PATCH" && internalMatch) {
-        await send(response, 200, await learningLoop.updateFeedbackByOperatorAsync(internalMatch.id, { status: internalBody?.status, internalNote: internalBody?.internalNote }));
+        const internalBody = await readJsonBody(request);
+        await send(response, 200, await learningLoop.updateFeedbackByOperatorAsync(internalMatch.id, dependencies.feedbackOperatorId ?? "feedback-operator", { status: internalBody?.status, internalNote: internalBody?.internalNote }));
         return;
       }
       await send(response, 404, { error: "Not found." });
@@ -250,19 +255,25 @@ export function createLearningLoopServer(
       return send(response, 200, await learningLoop.getEntitlementsAsync(auth));
     }
     if (method === "POST" && route === "/feedback") {
-      return sendIdempotent(request, response, auth, "submit-feedback", () => learningLoop.submitFeedbackAsync(auth, {
-        type: body?.type,
-        questionId: body?.questionId,
-        explanationVersion: body?.explanationVersion,
-        modelVersion: body?.modelVersion,
-        requestVersion: body?.requestVersion,
-        outcome: body?.outcome,
-        issueKinds: body?.issueKinds,
-        featureKind: body?.featureKind,
-        page: body?.page,
-        clientVersion: body?.clientVersion,
-        note: body?.note,
-      }));
+      if (body?.attachment !== undefined || body?.attachments !== undefined) {
+        throw new Error("Feedback attachments are not supported.");
+      }
+      return sendIdempotent(request, response, auth, "submit-feedback", async () => {
+        await learningLoop.submitFeedbackAsync(auth, {
+          type: body?.type,
+          questionId: body?.questionId,
+          explanationVersion: body?.explanationVersion,
+          modelVersion: body?.modelVersion,
+          requestVersion: body?.requestVersion,
+          outcome: body?.outcome,
+          issueKinds: body?.issueKinds,
+          featureKind: body?.featureKind,
+          page: body?.page,
+          clientVersion: body?.clientVersion,
+          note: body?.note,
+        });
+        return { received: true };
+      });
     }
     if (method === "DELETE" && route === "/account") {
       await learningLoop.deleteParentAccountAsync(auth);

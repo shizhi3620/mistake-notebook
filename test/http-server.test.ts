@@ -508,16 +508,18 @@ test("feedback submission is idempotent and operator routes require a separate s
     const replay = await api.call("POST", "/feedback", { token, body: { type: "feature", featureKind: "feature_request", note: "增加筛选" }, idempotencyKey: "feedback-1" });
     assert.equal(first.status, 200);
     assert.deepEqual(replay.body, first.body);
+    assert.deepEqual(first.body, { received: true });
 
     const unauthorized = await fetch(`${api.baseUrl}/internal/feedback`);
     assert.equal(unauthorized.status, 401);
 
-    const listed = await fetch(`${api.baseUrl}/internal/feedback`, {
+    const listed = await fetch(`${api.baseUrl}/internal/feedback?type=feature&priority=normal&status=new`, {
       headers: { "x-feedback-operator-secret": "operator-secret" },
     });
     assert.equal(listed.status, 200);
-    const records = await listed.json() as Array<{ id: string }>;
+    const records = await listed.json() as Array<{ id: string; parentAccountId?: string }>;
     assert.equal(records.length, 1);
+    assert.equal(records[0].parentAccountId, undefined);
 
     const updated = await fetch(`${api.baseUrl}/internal/feedback/${records[0].id}`, {
       method: "PATCH",
@@ -528,12 +530,56 @@ test("feedback submission is idempotent and operator routes require a separate s
       body: JSON.stringify({ status: "reviewing", internalNote: "已分派" }),
     });
     assert.equal(updated.status, 200);
-    assert.deepEqual(await updated.json(), {
-      ...first.body,
+    const updatedBody = await updated.json();
+    assert.equal(updatedBody.status, "reviewing");
+    assert.equal(updatedBody.internalNote, "已分派");
+    assert.equal(updatedBody.parentAccountId, undefined);
+    assert.deepEqual(updatedBody.auditTrail, [{
+      operatorId: "feedback-operator",
+      changedAt: updatedBody.updatedAt,
+      previousStatus: "new",
       status: "reviewing",
+      previousInternalNote: null,
       internalNote: "已分派",
+    }]);
+
+    const invalidTransition = await fetch(`${api.baseUrl}/internal/feedback/${records[0].id}`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        "x-feedback-operator-secret": "operator-secret",
+      },
+      body: JSON.stringify({ status: "new" }),
     });
+    assert.equal(invalidTransition.status, 400);
   }, { feedbackOperatorSecret: "operator-secret" });
+});
+
+test("feedback HTTP contract rejects invalid input without exposing internal records", async () => {
+  await withServer(async (api) => {
+    const missingSession = await api.call("POST", "/feedback", {
+      body: { type: "feature", featureKind: "other" },
+    });
+    assert.equal(missingSession.status, 401);
+
+    const login = await api.call("POST", "/session", { body: { code: "feedback-validation" } });
+    const token = login.body.session.token as string;
+    const invalidType = await api.call("POST", "/feedback", {
+      token,
+      body: { type: "unknown", featureKind: "other" },
+    });
+    assert.equal(invalidType.status, 400);
+    const invalidCategory = await api.call("POST", "/feedback", {
+      token,
+      body: { type: "feature", featureKind: "invalid" },
+    });
+    assert.equal(invalidCategory.status, 400);
+    const attachment = await api.call("POST", "/feedback", {
+      token,
+      body: { type: "feature", featureKind: "other", attachment: "file-id" },
+    });
+    assert.equal(attachment.status, 400);
+  });
 });
 
 test("the HTTP API keeps homework grading pending until a guardian confirms each question", async () => {

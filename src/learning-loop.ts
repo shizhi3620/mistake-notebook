@@ -159,6 +159,14 @@ export type Explanation = {
 
 export type FeedbackType = "explanation_quality" | "feature" | "safety";
 export type FeedbackStatus = "new" | "reviewing" | "resolved" | "rejected";
+export type FeedbackAuditEntry = {
+  operatorId: string;
+  changedAt: number;
+  previousStatus: FeedbackStatus;
+  status: FeedbackStatus;
+  previousInternalNote: string | null;
+  internalNote: string | null;
+};
 export type FeedbackRecord = {
   id: string;
   parentAccountId: string;
@@ -177,8 +185,16 @@ export type FeedbackRecord = {
   status: FeedbackStatus;
   priority: "normal" | "high";
   internalNote: string | null;
+  auditTrail: FeedbackAuditEntry[];
   createdAt: number;
   updatedAt: number;
+};
+
+export type FeedbackOperatorCase = Omit<FeedbackRecord, "parentAccountId">;
+export type FeedbackOperatorFilters = {
+  type?: FeedbackType;
+  priority?: FeedbackRecord["priority"];
+  status?: FeedbackStatus;
 };
 
 export type MistakeRecord = {
@@ -1095,6 +1111,7 @@ export type LearningLoopOptions = {
     parentAccountId: string,
   ) => void | Promise<void>;
   imageDeleter?: (fileId: string) => Promise<void>;
+  feedbackContentSafetyChecker?: (input: { type: FeedbackType; note: string }) => boolean | Promise<boolean>;
 };
 
 export class LearningLoop {
@@ -1110,6 +1127,7 @@ export class LearningLoop {
     parentAccountId: string,
   ) => void | Promise<void>;
   private readonly imageDeleter?: (fileId: string) => Promise<void>;
+  private readonly feedbackContentSafetyChecker?: LearningLoopOptions["feedbackContentSafetyChecker"];
 
   // Promise-compatible facades for the remaining legacy synchronous domain entrypoints.
   async startReviewAsync(parentAccountId: string, mistakeId: string, options: { exercise?: "original" | "variant" } = {}): Promise<ReviewSession> {
@@ -1474,6 +1492,7 @@ export class LearningLoop {
     this.explanationProvider = options.explanationProvider;
     this.reminderSender = options.reminderSender;
     this.imageDeleter = options.imageDeleter;
+    this.feedbackContentSafetyChecker = options.feedbackContentSafetyChecker;
   }
 
   private startWeChatLogin(weChatSubject: string): WeChatLogin {
@@ -3033,6 +3052,7 @@ export class LearningLoop {
     if (!["explanation_quality", "feature", "safety"].includes(input.type)) throw new Error("Invalid feedback type.");
     const note = input.note?.trim() || null;
     if (note && (note.length < 1 || note.length > 500)) throw new Error("Feedback note must be 1-500 characters.");
+    if (note && this.feedbackContentSafetyChecker && !(await this.feedbackContentSafetyChecker({ type: input.type, note }))) throw new Error("Feedback content failed safety review.");
     if (input.type === "explanation_quality" || input.type === "safety") {
       if (!input.questionId) throw new Error("Feedback requires a question.");
       const question = await this.asyncStore.findQuestion(parentAccountId, input.questionId);
@@ -3040,12 +3060,12 @@ export class LearningLoop {
       if (input.type === "safety" && !note) throw new Error("Safety feedback requires a note.");
       if (input.type === "explanation_quality" && !input.outcome) throw new Error("Explanation feedback requires an outcome.");
       if (input.outcome === "problematic" && (!input.issueKinds?.length || input.issueKinds.some((kind) => !["question_text", "answer", "explanation", "difficulty"].includes(kind)))) throw new Error("Invalid explanation feedback issue.");
-      const feedback: FeedbackRecord = { id: randomUUID(), parentAccountId, childProfileId: question.childProfileId, questionId: question.id, explanationVersion: input.explanationVersion?.trim() || null, modelVersion: input.modelVersion?.trim() || null, requestVersion: input.requestVersion?.trim() || null, type: input.type, outcome: input.outcome ?? null, issueKinds: input.issueKinds ?? [], featureKind: null, page: null, clientVersion: input.clientVersion?.trim() || null, note, status: "new", priority: input.type === "safety" ? "high" : "normal", internalNote: null, createdAt: this.now(), updatedAt: this.now() };
+      const feedback: FeedbackRecord = { id: randomUUID(), parentAccountId, childProfileId: question.childProfileId, questionId: question.id, explanationVersion: input.explanationVersion?.trim() || null, modelVersion: input.modelVersion?.trim() || null, requestVersion: input.requestVersion?.trim() || null, type: input.type, outcome: input.outcome ?? null, issueKinds: input.issueKinds ?? [], featureKind: null, page: null, clientVersion: input.clientVersion?.trim() || null, note, status: "new", priority: input.type === "safety" ? "high" : "normal", internalNote: null, auditTrail: [], createdAt: this.now(), updatedAt: this.now() };
       await this.asyncStore.createFeedback(feedback);
       return feedback;
     }
-    if (!input.featureKind) throw new Error("Feature feedback requires a category.");
-    const feedback: FeedbackRecord = { id: randomUUID(), parentAccountId, childProfileId: null, questionId: null, explanationVersion: null, modelVersion: null, requestVersion: null, type: "feature", outcome: null, issueKinds: [], featureKind: input.featureKind, page: input.page?.trim() || null, clientVersion: input.clientVersion?.trim() || null, note, status: "new", priority: "normal", internalNote: null, createdAt: this.now(), updatedAt: this.now() };
+    if (!input.featureKind || !["usability", "operation_failure", "feature_request", "other"].includes(input.featureKind)) throw new Error("Feature feedback requires a valid category.");
+    const feedback: FeedbackRecord = { id: randomUUID(), parentAccountId, childProfileId: null, questionId: null, explanationVersion: null, modelVersion: null, requestVersion: null, type: "feature", outcome: null, issueKinds: [], featureKind: input.featureKind, page: input.page?.trim() || null, clientVersion: input.clientVersion?.trim() || null, note, status: "new", priority: "normal", internalNote: null, auditTrail: [], createdAt: this.now(), updatedAt: this.now() };
     await this.asyncStore.createFeedback(feedback);
     return feedback;
   }
@@ -3067,16 +3087,31 @@ export class LearningLoop {
     return this.asyncStore.listFeedback(parentAccountId);
   }
 
-  async listAllFeedbackAsync(): Promise<FeedbackRecord[]> { return this.asyncStore.listAllFeedback(); }
-  async updateFeedbackByOperatorAsync(feedbackId: string, input: { status?: FeedbackStatus; internalNote?: string | null }): Promise<FeedbackRecord> {
+  async listAllFeedbackAsync(filters: FeedbackOperatorFilters = {}): Promise<FeedbackOperatorCase[]> {
+    return (await this.asyncStore.listAllFeedback())
+      .filter((feedback) => (!filters.type || feedback.type === filters.type) && (!filters.priority || feedback.priority === filters.priority) && (!filters.status || feedback.status === filters.status))
+      .map(({ parentAccountId: _parentAccountId, ...feedback }) => ({ ...feedback, auditTrail: feedback.auditTrail ?? [] }));
+  }
+  async updateFeedbackByOperatorAsync(feedbackId: string, operatorId: string, input: { status?: FeedbackStatus; internalNote?: string | null }): Promise<FeedbackOperatorCase> {
     const feedback = await this.asyncStore.findFeedbackById(feedbackId);
     if (!feedback) throw new Error("Feedback was not found.");
     if (input.status && !["new", "reviewing", "resolved", "rejected"].includes(input.status)) throw new Error("Invalid feedback status.");
+    if (input.status && !this.isValidFeedbackStatusTransition(feedback.status, input.status)) throw new Error("Invalid feedback status transition.");
+    const previousStatus = feedback.status;
+    const previousInternalNote = feedback.internalNote;
     if (input.status) feedback.status = input.status;
     if (input.internalNote !== undefined) feedback.internalNote = input.internalNote?.trim() || null;
+    if (feedback.status !== previousStatus || feedback.internalNote !== previousInternalNote) {
+      feedback.auditTrail = [...(feedback.auditTrail ?? []), { operatorId, changedAt: this.now(), previousStatus, status: feedback.status, previousInternalNote, internalNote: feedback.internalNote }];
+    }
     feedback.updatedAt = this.now();
     await this.asyncStore.saveFeedback(feedback);
-    return feedback;
+    const { parentAccountId: _parentAccountId, ...operatorCase } = feedback;
+    return { ...operatorCase, auditTrail: operatorCase.auditTrail ?? [] };
+  }
+
+  private isValidFeedbackStatusTransition(from: FeedbackStatus, to: FeedbackStatus): boolean {
+    return (from === "new" && ["reviewing", "resolved", "rejected"].includes(to)) || (from === "reviewing" && ["resolved", "rejected"].includes(to));
   }
 
   private createChildProfile(

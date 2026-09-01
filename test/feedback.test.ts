@@ -31,3 +31,18 @@ test("safety feedback requires a note and has high priority", async () => {
   const updated = await loop.updateFeedbackAsync(guardian.id, feedback.id, { status: "reviewing", internalNote: "已进入审核" });
   assert.equal(updated.status, "reviewing");
 });
+
+test("feedback content safety checker rejects unsafe notes", async () => {
+  const loop = new LearningLoop(undefined, {
+    feedbackContentSafetyChecker: async () => false,
+  });
+  const guardian = (await loop.startWeChatLoginAsync("feedback-content-safety")).account;
+  await assert.rejects(
+    () => loop.submitFeedbackAsync(guardian.id, {
+      type: "feature",
+      featureKind: "other",
+      note: "需要审核的内容",
+    }),
+    /failed safety review/i,
+  );
+});

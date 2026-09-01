@@ -136,6 +136,7 @@ const server = createLearningLoopServer({
   recognitionClient,
   reminderSchedulerSecret,
   feedbackOperatorSecret: process.env.FEEDBACK_OPERATOR_SECRET?.trim() || undefined,
+  feedbackOperatorId: process.env.FEEDBACK_OPERATOR_ID?.trim() || "feedback-operator",
   log: (event) => console.log(JSON.stringify(event)),
   weChatIdentityResolver: createWeChatIdentityResolver({
     appId: weChatAppId,
