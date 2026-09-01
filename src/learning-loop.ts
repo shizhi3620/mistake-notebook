@@ -3037,6 +3037,7 @@ export class LearningLoop {
   async submitFeedbackAsync(parentAccountId: string, input: {
     type: FeedbackType;
     questionId?: string;
+    childProfileId?: string;
     explanationVersion?: string;
     modelVersion?: string;
     requestVersion?: string;
@@ -3065,7 +3066,9 @@ export class LearningLoop {
       return feedback;
     }
     if (!input.featureKind || !["usability", "operation_failure", "feature_request", "other"].includes(input.featureKind)) throw new Error("Feature feedback requires a valid category.");
-    const feedback: FeedbackRecord = { id: randomUUID(), parentAccountId, childProfileId: null, questionId: null, explanationVersion: null, modelVersion: null, requestVersion: null, type: "feature", outcome: null, issueKinds: [], featureKind: input.featureKind, page: input.page?.trim() || null, clientVersion: input.clientVersion?.trim() || null, note, status: "new", priority: "normal", internalNote: null, auditTrail: [], createdAt: this.now(), updatedAt: this.now() };
+    const child = input.childProfileId ? await this.asyncStore.findChildProfile(parentAccountId, input.childProfileId) : undefined;
+    if (input.childProfileId && !child) throw new Error("Child profile is not available to this guardian.");
+    const feedback: FeedbackRecord = { id: randomUUID(), parentAccountId, childProfileId: child?.id ?? null, questionId: null, explanationVersion: null, modelVersion: null, requestVersion: null, type: "feature", outcome: null, issueKinds: [], featureKind: input.featureKind, page: input.page?.trim() || null, clientVersion: input.clientVersion?.trim() || null, note, status: "new", priority: "normal", internalNote: null, auditTrail: [], createdAt: this.now(), updatedAt: this.now() };
     await this.asyncStore.createFeedback(feedback);
     return feedback;
   }

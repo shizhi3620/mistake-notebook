@@ -579,6 +579,47 @@ test("feedback HTTP contract rejects invalid input without exposing internal rec
       body: { type: "feature", featureKind: "other", attachment: "file-id" },
     });
     assert.equal(attachment.status, 400);
+
+    await api.call("POST", "/guardianship/confirm", { token });
+    const child = await api.call("POST", "/children", {
+      token,
+      body: { nickname: "小明", grade: 3 },
+    });
+    const draft = await api.call("POST", "/drafts", {
+      token,
+      body: { childProfileId: child.body.id, source: "manual" },
+    });
+    const question = await api.call("POST", `/drafts/${draft.body.id}/confirm`, {
+      token,
+      body: { stem: "1+1=?" },
+    });
+    const quality = await api.call("POST", "/feedback", {
+      token,
+      body: { type: "explanation_quality", questionId: question.body.id, outcome: "helpful" },
+    });
+    const safety = await api.call("POST", "/feedback", {
+      token,
+      body: { type: "safety", questionId: question.body.id, note: "不适合未成年人" },
+    });
+    assert.deepEqual(quality.body, { received: true });
+    assert.deepEqual(safety.body, { received: true });
+    const missingQuestion = await api.call("POST", "/feedback", {
+      token,
+      body: { type: "safety", note: "缺少题目" },
+    });
+    assert.equal(missingQuestion.status, 400);
+    const longNote = await api.call("POST", "/feedback", {
+      token,
+      body: { type: "feature", featureKind: "other", note: "a".repeat(501) },
+    });
+    assert.equal(longNote.status, 400);
+
+    const otherLogin = await api.call("POST", "/session", { body: { code: "feedback-other-family" } });
+    const crossAccount = await api.call("POST", "/feedback", {
+      token: otherLogin.body.session.token,
+      body: { type: "explanation_quality", questionId: question.body.id, outcome: "helpful" },
+    });
+    assert.equal(crossAccount.status, 400);
   });
 });
 

@@ -11,8 +11,9 @@ test("guardian can submit explanation and feature feedback with isolation", asyn
   const question = await loop.confirmQuestionAsync(guardian.id, draft.id, { stem: "3+5=?" });
   const quality = await loop.submitFeedbackAsync(guardian.id, { type: "explanation_quality", questionId: question.id, outcome: "problematic", issueKinds: ["answer"], note: "答案需要核对" });
   assert.equal(quality.priority, "normal");
-  const feature = await loop.submitFeedbackAsync(guardian.id, { type: "feature", featureKind: "feature_request", page: "/home", clientVersion: "1.0.0" });
+  const feature = await loop.submitFeedbackAsync(guardian.id, { type: "feature", featureKind: "feature_request", childProfileId: child.id, page: "/home", clientVersion: "1.0.0" });
   assert.equal(feature.questionId, null);
+  assert.equal(feature.childProfileId, child.id);
   assert.equal((await loop.listFeedbackAsync(guardian.id)).length, 2);
   const other = (await loop.startWeChatLoginAsync("feedback-b")).account;
   assert.equal((await loop.listFeedbackAsync(other.id)).length, 0);

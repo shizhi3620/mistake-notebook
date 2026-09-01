@@ -262,6 +262,7 @@ export function createLearningLoopServer(
         await learningLoop.submitFeedbackAsync(auth, {
           type: body?.type,
           questionId: body?.questionId,
+          childProfileId: body?.childProfileId,
           explanationVersion: body?.explanationVersion,
           modelVersion: body?.modelVersion,
           requestVersion: body?.requestVersion,
