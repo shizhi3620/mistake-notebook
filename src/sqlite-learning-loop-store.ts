@@ -1363,6 +1363,8 @@ export class SqliteLearningLoopStore implements LearningLoopStore {
   createFeedback(feedback: FeedbackRecord): void { this.database.prepare("INSERT INTO feedback (id,parent_account_id,payload_json) VALUES (?,?,?)").run(feedback.id, feedback.parentAccountId, JSON.stringify(feedback)); }
   findFeedback(parentAccountId: string, feedbackId: string): FeedbackRecord | undefined { const row = this.database.prepare("SELECT payload_json FROM feedback WHERE id=? AND parent_account_id=?").get(feedbackId, parentAccountId) as { payload_json: string } | undefined; return row ? JSON.parse(row.payload_json) as FeedbackRecord : undefined; }
   listFeedback(parentAccountId: string): FeedbackRecord[] { const rows = this.database.prepare("SELECT payload_json FROM feedback WHERE parent_account_id=? ORDER BY rowid").all(parentAccountId) as { payload_json: string }[]; return rows.map((row) => JSON.parse(row.payload_json) as FeedbackRecord); }
+  listAllFeedback(): FeedbackRecord[] { const rows = this.database.prepare("SELECT payload_json FROM feedback ORDER BY rowid").all() as { payload_json: string }[]; return rows.map((row) => JSON.parse(row.payload_json) as FeedbackRecord); }
+  findFeedbackById(feedbackId: string): FeedbackRecord | undefined { const row = this.database.prepare("SELECT payload_json FROM feedback WHERE id=?").get(feedbackId) as { payload_json: string } | undefined; return row ? JSON.parse(row.payload_json) as FeedbackRecord : undefined; }
   saveFeedback(feedback: FeedbackRecord): void { this.database.prepare("UPDATE feedback SET payload_json=? WHERE id=? AND parent_account_id=?").run(JSON.stringify(feedback), feedback.id, feedback.parentAccountId); }
 
   close(): void {

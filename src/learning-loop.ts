@@ -486,6 +486,8 @@ export interface LearningLoopStore {
   createFeedback(feedback: FeedbackRecord): void;
   findFeedback(parentAccountId: string, feedbackId: string): FeedbackRecord | undefined;
   listFeedback(parentAccountId: string): FeedbackRecord[];
+  listAllFeedback(): FeedbackRecord[];
+  findFeedbackById(feedbackId: string): FeedbackRecord | undefined;
   saveFeedback(feedback: FeedbackRecord): void;
 }
 
@@ -960,6 +962,8 @@ class InMemoryLearningLoopStore implements LearningLoopStore {
   createFeedback(feedback: FeedbackRecord): void { this.feedback.set(feedback.id, feedback); }
   findFeedback(parentAccountId: string, feedbackId: string): FeedbackRecord | undefined { const item = this.feedback.get(feedbackId); return item?.parentAccountId === parentAccountId ? item : undefined; }
   listFeedback(parentAccountId: string): FeedbackRecord[] { return [...this.feedback.values()].filter((item) => item.parentAccountId === parentAccountId); }
+  listAllFeedback(): FeedbackRecord[] { return [...this.feedback.values()]; }
+  findFeedbackById(feedbackId: string): FeedbackRecord | undefined { return this.feedback.get(feedbackId); }
   saveFeedback(feedback: FeedbackRecord): void { this.feedback.set(feedback.id, feedback); }
 }
 
@@ -3061,6 +3065,18 @@ export class LearningLoop {
     const account = await this.asyncStore.findParentAccount(parentAccountId);
     if (!account) throw new Error("Parent account was not found.");
     return this.asyncStore.listFeedback(parentAccountId);
+  }
+
+  async listAllFeedbackAsync(): Promise<FeedbackRecord[]> { return this.asyncStore.listAllFeedback(); }
+  async updateFeedbackByOperatorAsync(feedbackId: string, input: { status?: FeedbackStatus; internalNote?: string | null }): Promise<FeedbackRecord> {
+    const feedback = await this.asyncStore.findFeedbackById(feedbackId);
+    if (!feedback) throw new Error("Feedback was not found.");
+    if (input.status && !["new", "reviewing", "resolved", "rejected"].includes(input.status)) throw new Error("Invalid feedback status.");
+    if (input.status) feedback.status = input.status;
+    if (input.internalNote !== undefined) feedback.internalNote = input.internalNote?.trim() || null;
+    feedback.updatedAt = this.now();
+    await this.asyncStore.saveFeedback(feedback);
+    return feedback;
   }
 
   private createChildProfile(

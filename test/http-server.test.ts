@@ -133,6 +133,7 @@ async function withServer(
 }
 
 type ApiClient = {
+  baseUrl: string;
   call(
     method: string,
     path: string,
@@ -146,9 +147,11 @@ function makeApiClient(
   _now: () => number,
   advance: (value: number) => void,
 ): ApiClient {
+  const baseUrl = `http://127.0.0.1:${port}`;
   return {
+    baseUrl,
     async call(method, path, options = {}) {
-      const response = await fetch(`http://127.0.0.1:${port}/api${path}`, {
+      const response = await fetch(`${baseUrl}/api${path}`, {
         method,
         headers: {
           "content-type": "application/json",
@@ -495,6 +498,42 @@ test("creating a child with an incomplete payload returns a readable validation 
     assert.match(response.body.error, /nickname/i);
     assert.doesNotMatch(response.body.error, /undefined\.trim/i);
   });
+});
+
+test("feedback submission is idempotent and operator routes require a separate secret", async () => {
+  await withServer(async (api) => {
+    const login = await api.call("POST", "/session", { body: { code: "feedback-http" } });
+    const token = login.body.session.token as string;
+    const first = await api.call("POST", "/feedback", { token, body: { type: "feature", featureKind: "feature_request", note: "增加筛选" }, idempotencyKey: "feedback-1" });
+    const replay = await api.call("POST", "/feedback", { token, body: { type: "feature", featureKind: "feature_request", note: "增加筛选" }, idempotencyKey: "feedback-1" });
+    assert.equal(first.status, 200);
+    assert.deepEqual(replay.body, first.body);
+
+    const unauthorized = await fetch(`${api.baseUrl}/internal/feedback`);
+    assert.equal(unauthorized.status, 401);
+
+    const listed = await fetch(`${api.baseUrl}/internal/feedback`, {
+      headers: { "x-feedback-operator-secret": "operator-secret" },
+    });
+    assert.equal(listed.status, 200);
+    const records = await listed.json() as Array<{ id: string }>;
+    assert.equal(records.length, 1);
+
+    const updated = await fetch(`${api.baseUrl}/internal/feedback/${records[0].id}`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        "x-feedback-operator-secret": "operator-secret",
+      },
+      body: JSON.stringify({ status: "reviewing", internalNote: "已分派" }),
+    });
+    assert.equal(updated.status, 200);
+    assert.deepEqual(await updated.json(), {
+      ...first.body,
+      status: "reviewing",
+      internalNote: "已分派",
+    });
+  }, { feedbackOperatorSecret: "operator-secret" });
 });
 
 test("the HTTP API keeps homework grading pending until a guardian confirms each question", async () => {

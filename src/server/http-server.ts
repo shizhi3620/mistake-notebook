@@ -39,6 +39,7 @@ export type LearningLoopServerDependencies = {
   maxAiRequestsPerMinute?: number;
   maxAiRequestsPerMonth?: number;
   reminderSchedulerSecret?: string;
+  feedbackOperatorSecret?: string;
   idempotencyStore?: IdempotencyStore;
 };
 
@@ -178,6 +179,34 @@ export function createLearningLoopServer(
       await send(response, 200, {
         outcomes: await learningLoop.dispatchDueRemindersAsync(),
       });
+      return;
+    }
+
+    if (path.startsWith("/internal/feedback")) {
+      const configuredSecret = dependencies.feedbackOperatorSecret;
+      const suppliedSecret = String(request.headers["x-feedback-operator-secret"] ?? "");
+      const expected = Buffer.from(configuredSecret ?? "");
+      const supplied = Buffer.from(suppliedSecret);
+      if (
+        !configuredSecret ||
+        expected.length !== supplied.length ||
+        !timingSafeEqual(expected, supplied)
+      ) {
+        await send(response, 401, { error: "Unauthorized." });
+        return;
+      }
+      const internalRoute = path.replace(/^\/internal/, "");
+      const internalBody = await readJsonBody(request);
+      if (method === "GET" && internalRoute === "/feedback") {
+        await send(response, 200, await learningLoop.listAllFeedbackAsync());
+        return;
+      }
+      const internalMatch = match(internalRoute, "/feedback/:id");
+      if (method === "PATCH" && internalMatch) {
+        await send(response, 200, await learningLoop.updateFeedbackByOperatorAsync(internalMatch.id, { status: internalBody?.status, internalNote: internalBody?.internalNote }));
+        return;
+      }
+      await send(response, 404, { error: "Not found." });
       return;
     }
 
