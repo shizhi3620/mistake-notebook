@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** done
+**Status:** resolved
 
 - [x] 开发版使用私有 HTTPS API 配置，体验版和正式版使用 `callContainer` 调用 `prod-d8giqy4sjc5925f68` 中的 `ctb`。
 - [x] 体验版和正式版请求保留 `/api` 路径、HTTP 方法、JSON body、Bearer token 与 `Idempotency-Key` 语义，并发送正确服务标识。

@@ -1,6 +1,7 @@
 const {
   apiBaseByEnvironment = {},
   containerServiceByEnvironment = {},
+  cloudEnvByEnvironment = {},
   reminderTemplateIdByEnvironment = {},
 } = require("./config.private");
 
@@ -17,7 +18,7 @@ if (transport === "container" && (typeof containerService !== "string" || !conta
 }
 
 module.exports = {
-  cloudEnv: "prod-d8giqy4sjc5925f68",
+  cloudEnv: cloudEnvByEnvironment[environment] || "",
   apiBase,
   containerService,
   transport,

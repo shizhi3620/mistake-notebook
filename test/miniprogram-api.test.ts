@@ -98,6 +98,41 @@ test("the Cloud Hosting API client preserves session and idempotency headers", a
   assert.deepEqual(JSON.parse(JSON.stringify(calls[0]?.data)), { type: "feature" });
 });
 
+for (const transport of ["https", "container"] as const) {
+  test(`${transport} transport supports login and one session-expiry retry`, async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    let attempt = 0;
+    const api = loadApi({
+      transport,
+      apiBase: "https://localhost.example/api",
+      cloudEnv: "prod-d8giqy4sjc5925f68",
+      containerService: "ctb",
+    }, {
+      getSystemInfoSync: () => ({ SDKVersion: "2.13.1" }),
+      login(options: { success: (value: { code: string }) => void }) {
+        options.success({ code: "login-code" });
+      },
+      request(options: Record<string, unknown>) {
+        calls.push(options);
+        attempt += 1;
+        const success = options.success as (response: Record<string, unknown>) => void;
+        success(attempt === 1 ? { statusCode: 401, data: {} } : { statusCode: 200, data: attempt === 2 ? { session: { token: "fresh-token" } } : { ok: true } });
+      },
+      cloud: {
+        callContainer(options: ContainerCallOptions) {
+          calls.push(options);
+          attempt += 1;
+          options.success?.(attempt === 1 ? { statusCode: 401, data: {} } : { statusCode: 200, data: attempt === 2 ? { session: { token: "fresh-token" } } : { ok: true } });
+        },
+      },
+    }, "expired-token");
+
+    assert.deepEqual(await api.request("GET", "/home"), { ok: true });
+    assert.equal(calls.length, 3);
+    assert.equal((calls[1]?.data as { code?: string })?.code, "login-code");
+  });
+}
+
 function loadApi(config: Record<string, unknown>, wxOverrides: Record<string, unknown>, savedToken = "") {
   const storage = new Map<string, unknown>();
   if (savedToken) storage.set("sessionToken", savedToken);

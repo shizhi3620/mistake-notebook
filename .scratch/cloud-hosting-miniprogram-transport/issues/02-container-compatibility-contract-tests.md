@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — 小程序云托管传输切换
 
-**Status:** done
+**Status:** resolved
 
 - [x] 验证开发版使用 HTTPS API，体验版和正式版使用云托管调用，且外部请求契约一致。
 - [x] 验证服务标识、`/api` 路径、Bearer token、幂等键和 JSON body 在云托管调用中完整传递。
