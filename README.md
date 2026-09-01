@@ -21,7 +21,7 @@ export DEEPSEEK_API_KEY="sk-..."   # 讲解与识别（可选，不设置则禁�
 npm start                          # http://127.0.0.1:3000
 ```
 
-环境变量：`WECHAT_APP_ID`、`WECHAT_APP_SECRET`（启动服务必需），以及 `PORT`（默认 3000）、`DATABASE_PATH`、`LLM_BASE_URL`、`EXPLANATION_MODEL`、`RECOGNITION_MODEL`。云托管照片识别还需配置 `CLOUDBASE_ENV=prod-d8giqy4sjc5925f68` 和 `CLOUDBASE_REGION=ap-shanghai`。`DEEPSEEK_API_KEY` 仍可选；未设置时题目识别与讲解不可用。
+环境变量：`WECHAT_APP_ID`、`WECHAT_APP_SECRET`（启动服务必需），以及 `PORT`（默认 3000）、`DATABASE_PATH`、`APP_VERSION`（首版为 `0.1.0`）、`EXPLANATION_VERSION`（首版为 `explanation-v1`）、`EXPLANATION_REQUEST_VERSION`（首版为 `explanation-request-v1`）、`LLM_BASE_URL`、`EXPLANATION_MODEL`、`RECOGNITION_MODEL`。云托管照片识别还需配置 `CLOUDBASE_ENV=prod-d8giqy4sjc5925f68` 和 `CLOUDBASE_REGION=ap-shanghai`。`DEEPSEEK_API_KEY` 仍可选；未设置时题目识别与讲解不可用。
 
 小程序端：用微信开发者工具打开 `miniprogram/`，在本地 `project.private.config.json` 填入已获授权的小程序 AppID。为开发、体验和正式环境配置已登记的 HTTPS API 域名后，执行：
 
