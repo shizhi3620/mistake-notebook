@@ -58,8 +58,7 @@ Page({
     this.setData({ recognizing: true });
     try {
       console.log("[homework_recognition_started]", { transport: require("../../config").transport });
-      const imagePath = await compress(this.data.imagePath);
-      const imageDataUrl = await readImageDataUrl(imagePath);
+      const imageDataUrl = await compressForContainer(this.data.imagePath);
       console.log("[homework_recognition_image_ready]", { imageDataUrlLength: imageDataUrl.length });
       if (imageDataUrl.length > 95_000) throw new Error("图片过大，请裁剪作业区域后重试");
       const review = await api.request("POST", "/homework-reviews", {
@@ -132,8 +131,24 @@ Page({
   finish() { wx.navigateBack(); },
 });
 
-function compress(src) {
-  return new Promise((resolve) => wx.compressImage({ src, quality: 30, compressedWidth: 768, success: (result) => resolve(result.tempFilePath), fail: () => resolve(src) }));
+async function compressForContainer(src) {
+  const attempts = [
+    { quality: 30, compressedWidth: 768 },
+    { quality: 22, compressedWidth: 640 },
+    { quality: 16, compressedWidth: 512 },
+    { quality: 12, compressedWidth: 400 },
+  ];
+  let imageDataUrl = await readImageDataUrl(src);
+  for (const attempt of attempts) {
+    if (imageDataUrl.length <= 90_000) return imageDataUrl;
+    const path = await compress(src, attempt.quality, attempt.compressedWidth);
+    imageDataUrl = await readImageDataUrl(path);
+  }
+  return imageDataUrl;
+}
+
+function compress(src, quality, compressedWidth) {
+  return new Promise((resolve) => wx.compressImage({ src, quality, compressedWidth, success: (result) => resolve(result.tempFilePath), fail: () => resolve(src) }));
 }
 
 function readImageDataUrl(filePath) {
