@@ -112,6 +112,22 @@ export function createLearningLoopServer(
     void handle(request, response).catch((error: unknown) => {
       const message =
         error instanceof Error ? error.message : "Unexpected server error.";
+      const status = isStorageFailure(error)
+        ? 503
+        : isRecognitionFailure(error)
+          ? 503
+          : /log in again/i.test(message)
+            ? 401
+            : 400;
+      log({
+        event: "request_error",
+        requestId,
+        method: request.method ?? "GET",
+        path: url.pathname,
+        status,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        errorMessage: sanitizeErrorMessage(message),
+      });
       if (isStorageFailure(error)) {
         void send(response, 503, { error: "storage_unavailable" });
         return;
@@ -122,7 +138,6 @@ export function createLearningLoopServer(
         });
         return;
       }
-      const status = /log in again/i.test(message) ? 401 : 400;
       void send(response, status, { error: message });
     });
   });
@@ -449,20 +464,33 @@ export function createLearningLoopServer(
         assertCloudBaseFileOwnership(fileId, credential.imageKey);
         const suppliedImageDataUrl = String(body.imageDataUrl ?? "");
         const suppliedImageUrl = String(body.imageUrl ?? "");
-        const uploaded = suppliedImageDataUrl
-          ? { imageUrl: validateRecognitionImageDataUrl(suppliedImageDataUrl) }
-          : suppliedImageUrl.startsWith("https://")
-          ? { imageUrl: suppliedImageUrl }
-          : photoStorage
-            ? await photoStorage.verifyUploadedFile({
-                fileId,
-                expectedImageKey: credential.imageKey,
-              })
-            : (() => {
-                throw new Error(
-                  "Photo storage URL is not available. Configure client-side CloudBase temporary URL or server storage credentials.",
-                );
-              })();
+        const imageResolutionStartedAt = Date.now();
+        let uploaded: { imageUrl: string };
+        let imageSource: "data_url" | "client_temp_url" | "server_temp_url";
+        if (suppliedImageDataUrl) {
+          uploaded = { imageUrl: validateRecognitionImageDataUrl(suppliedImageDataUrl) };
+          imageSource = "data_url";
+        } else if (suppliedImageUrl.startsWith("https://")) {
+          uploaded = { imageUrl: suppliedImageUrl };
+          imageSource = "client_temp_url";
+        } else if (photoStorage) {
+          imageSource = "server_temp_url";
+          uploaded = await photoStorage.verifyUploadedFile({
+            fileId,
+            expectedImageKey: credential.imageKey,
+          });
+        } else {
+          throw new Error(
+            "Photo storage URL is not available. Configure client-side CloudBase temporary URL or server storage credentials.",
+          );
+        }
+        log({
+          event: "photo_image_resolved",
+          requestId: String(response.getHeader("x-request-id") ?? ""),
+          source: imageSource,
+          imageUrlLength: uploaded.imageUrl.length,
+          durationMs: Date.now() - imageResolutionStartedAt,
+        });
         await learningLoop.completePhotoUploadAsync(
           auth,
           credential.uploadToken,
@@ -471,13 +499,27 @@ export function createLearningLoopServer(
         if (!recognitionClient) {
           throw new Error("题目识别服务未配置。请返回手动录入。");
         }
+        const recognitionStartedAt = Date.now();
+        log({
+          event: "photo_recognition_started",
+          requestId: String(response.getHeader("x-request-id") ?? ""),
+          imageSource,
+          imageUrlLength: uploaded.imageUrl.length,
+        });
+        const recognition = await recognitionClient({ imageDataUrl: uploaded.imageUrl });
+        log({
+          event: "photo_recognition_succeeded",
+          requestId: String(response.getHeader("x-request-id") ?? ""),
+          confidence: recognition.confidence,
+          durationMs: Date.now() - recognitionStartedAt,
+        });
         return send(
           response,
           200,
           await learningLoop.recordQuestionRecognitionAsync(
             auth,
             draftPhotoMatch.id,
-            await recognitionClient({ imageDataUrl: uploaded.imageUrl }),
+            recognition,
           ),
         );
       }
@@ -493,15 +535,29 @@ export function createLearningLoopServer(
         );
       }
 
+      const recognitionStartedAt = Date.now();
+      log({
+        event: "photo_recognition_started",
+        requestId: String(response.getHeader("x-request-id") ?? ""),
+        imageSource: "legacy_data_url",
+        imageUrlLength: typeof body?.imageDataUrl === "string" ? body.imageDataUrl.length : 0,
+      });
+      const recognition = await recognitionClient({
+        imageDataUrl: String(body?.imageDataUrl ?? ""),
+      });
+      log({
+        event: "photo_recognition_succeeded",
+        requestId: String(response.getHeader("x-request-id") ?? ""),
+        confidence: recognition.confidence,
+        durationMs: Date.now() - recognitionStartedAt,
+      });
       return send(
         response,
         200,
         await learningLoop.recordQuestionRecognitionAsync(
           auth,
           draftPhotoMatch.id,
-          await recognitionClient({
-            imageDataUrl: String(body?.imageDataUrl ?? ""),
-          }),
+          recognition,
         ),
       );
     }
@@ -757,4 +813,11 @@ function isRecognitionFailure(error: unknown): boolean {
     error instanceof Error &&
     /^(?:Recognition request|Recognition provider)/.test(error.message)
   );
+}
+
+function sanitizeErrorMessage(message: string): string {
+  return message
+    .replace(/https:\/\/[^\s]+/gi, "https://<redacted>")
+    .replace(/Bearer\s+[^\s]+/gi, "Bearer <redacted>")
+    .slice(0, 500);
 }
