@@ -94,12 +94,25 @@ Page({
           fail: reject,
         });
       });
+      console.log("[photo_upload_ready]", {
+        hasFileId: Boolean(upload.fileID),
+        hasTemporaryUrl: Boolean(temporaryUrl),
+        temporaryUrlLength: temporaryUrl ? temporaryUrl.length : 0,
+        transport: config.transport,
+      });
       const photoPayload = {
         uploadToken: credential.uploadToken,
         fileId: upload.fileID,
         imageKey: credential.imageKey,
         ...(config.transport === "https" ? { imageDataUrl } : { imageUrl: temporaryUrl }),
       };
+      console.log("[photo_recognition_submit]", {
+        hasFileId: Boolean(photoPayload.fileId),
+        hasUploadToken: Boolean(photoPayload.uploadToken),
+        hasImageDataUrl: Boolean(photoPayload.imageDataUrl),
+        hasImageUrl: Boolean(photoPayload.imageUrl),
+        imageDataUrlLength: photoPayload.imageDataUrl ? photoPayload.imageDataUrl.length : 0,
+      });
       const recognized = await api.request("POST", `/drafts/${draft.id}/photo`, photoPayload);
       wx.setStorageSync("currentDraft", recognized);
       wx.navigateTo({ url: `/pages/confirm/confirm?draftId=${draft.id}` });

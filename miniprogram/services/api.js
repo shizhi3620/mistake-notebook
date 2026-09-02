@@ -26,6 +26,7 @@ function request(method, path, body, options = {}) {
     ? `${Date.now()}-${Math.random().toString(36).slice(2)}`
     : "");
   return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
     sendRequest({
       method,
       path,
@@ -35,6 +36,13 @@ function request(method, path, body, options = {}) {
         ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
       },
       success: (res) => {
+        console.log("[api_response]", {
+          method,
+          path,
+          statusCode: res.statusCode,
+          durationMs: Date.now() - startedAt,
+          requestId: (res.header && (res.header["x-request-id"] || res.header["X-Request-Id"])) || "",
+        });
         if (res.statusCode === 401 && !options.skipAuth && !options.retried) {
           login()
             .then(() =>
@@ -52,7 +60,16 @@ function request(method, path, body, options = {}) {
         }
         resolve(res.data);
       },
-      fail: () => reject(new Error("网络连接失败，请检查服务是否已启动")),
+      fail: (error) => {
+        console.error("[api_failure]", {
+          method,
+          path,
+          durationMs: Date.now() - startedAt,
+          errCode: error && (error.errCode || error.errno || ""),
+          errMsg: error && error.errMsg ? String(error.errMsg).slice(0, 300) : "",
+        });
+        reject(new Error("网络连接失败，请检查服务是否已启动"));
+      },
     });
   });
 }
