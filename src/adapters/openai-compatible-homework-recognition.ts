@@ -10,6 +10,7 @@ export function createOpenAiCompatibleHomeworkRecognitionClient(options: OpenAiC
   const fetchImpl = options.fetchImpl ?? fetch;
   return async ({ imageDataUrl }) => {
     let response: Response;
+    const startedAt = Date.now();
     try {
       response = await fetchImpl(`${baseUrl}/v1/chat/completions`, {
         method: "POST",
@@ -18,12 +19,14 @@ export function createOpenAiCompatibleHomeworkRecognitionClient(options: OpenAiC
         signal: AbortSignal.timeout(options.timeoutMs ?? 14_000),
       });
     } catch (error) {
+      options.onEvent?.({ event: "vision_provider_failure", kind: "homework_page", attempt: 1, durationMs: Date.now() - startedAt, errorName: error instanceof Error ? error.name : "UnknownError", errorMessage: error instanceof Error ? error.message.slice(0, 200) : "unknown error" });
       throw new Error(`Recognition request unavailable: ${error instanceof Error ? error.message : "unknown error"}`);
     }
+    options.onEvent?.({ event: "vision_provider_response", kind: "homework_page", attempt: 1, status: response.status, durationMs: Date.now() - startedAt, retryAfter: response.headers.get("retry-after") ?? "" });
     if (!response.ok) throw new Error(`Recognition request failed with status ${response.status}.`);
     const content = (await response.json() as any)?.choices?.[0]?.message?.content;
     let parsed: any;
-    try { parsed = JSON.parse(content); } catch { throw new Error("Recognition provider returned invalid JSON."); }
+    try { parsed = JSON.parse(content); } catch { options.onEvent?.({ event: "vision_provider_invalid_payload", kind: "homework_page", reason: "invalid_json" }); throw new Error("Recognition provider returned invalid JSON."); }
     if (!Array.isArray(parsed?.questions) || parsed.questions.length === 0 || parsed.questions.length > 20) throw new Error("Recognition provider returned an invalid homework payload.");
     const questions = parsed.questions.map((question: any) => ({
       stem: typeof question.stem === "string" ? question.stem : "",

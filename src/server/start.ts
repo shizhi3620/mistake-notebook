@@ -24,6 +24,7 @@ import { createLearningLoopServer } from "./http-server.ts";
 import { MysqlIdempotencyStore } from "./idempotency-store.ts";
 
 const deepSeekApiKey = process.env.DEEPSEEK_API_KEY;
+const logEvent = (event: Record<string, unknown>) => console.log(JSON.stringify(event));
 const weChatAppId = requiredEnvironment("WECHAT_APP_ID");
 const weChatAppSecret = requiredEnvironment("WECHAT_APP_SECRET");
 const mysqlConfig = readMysqlConnectionConfig();
@@ -98,6 +99,7 @@ const recognitionClient = deepSeekApiKey
       // Cloud Hosting routing and the response so the client receives a retryable error.
       timeoutMs: 11_000,
       maxRetries: 0,
+      onEvent: logEvent,
     })
   : undefined;
 const homeworkRecognitionClient = deepSeekApiKey
@@ -107,6 +109,7 @@ const homeworkRecognitionClient = deepSeekApiKey
       model: process.env.HOMEWORK_RECOGNITION_MODEL ?? process.env.RECOGNITION_MODEL ?? "deepseek-v4-flash-vision-exp",
       timeoutMs: 11_000,
       maxRetries: 0,
+      onEvent: logEvent,
     })
   : undefined;
 
@@ -150,7 +153,7 @@ const server = createLearningLoopServer({
   reminderSchedulerSecret,
   feedbackOperatorSecret: process.env.FEEDBACK_OPERATOR_SECRET?.trim() || undefined,
   feedbackOperatorId: process.env.FEEDBACK_OPERATOR_ID?.trim() || "feedback-operator",
-  log: (event) => console.log(JSON.stringify(event)),
+  log: logEvent,
   weChatIdentityResolver: createWeChatIdentityResolver({
     appId: weChatAppId,
     appSecret: weChatAppSecret,

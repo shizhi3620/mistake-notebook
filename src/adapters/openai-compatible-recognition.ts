@@ -24,6 +24,7 @@ export function createOpenAiCompatibleRecognitionClient(
   return async ({ imageDataUrl }) => {
     let response: Response | undefined;
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      const startedAt = Date.now();
       try {
         response = await fetchImpl(`${baseUrl}/v1/chat/completions`, {
       method: "POST",
@@ -50,8 +51,10 @@ export function createOpenAiCompatibleRecognitionClient(
       }),
       signal: AbortSignal.timeout(timeoutMs),
         });
+        options.onEvent?.({ event: "vision_provider_response", kind: "single_question", attempt: attempt + 1, status: response.status, durationMs: Date.now() - startedAt, retryAfter: response.headers.get("retry-after") ?? "" });
         if (response.ok || response.status < 500 || attempt === maxRetries) break;
       } catch (error) {
+        options.onEvent?.({ event: "vision_provider_failure", kind: "single_question", attempt: attempt + 1, durationMs: Date.now() - startedAt, errorName: error instanceof Error ? error.name : "UnknownError", errorMessage: error instanceof Error ? error.message.slice(0, 200) : "unknown error" });
         if (attempt === maxRetries) throw new Error(`Recognition request unavailable after ${attempt + 1} attempts: ${error instanceof Error ? error.message : "unknown error"}`);
       }
     }
@@ -74,6 +77,7 @@ export function createOpenAiCompatibleRecognitionClient(
     try {
       parsed = JSON.parse(text);
     } catch {
+      options.onEvent?.({ event: "vision_provider_invalid_payload", kind: "single_question", reason: "invalid_json" });
       throw new Error("Recognition provider returned invalid JSON.");
     }
 

@@ -10,6 +10,7 @@ export type OpenAiCompatibleAdapterOptions = {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   maxRetries?: number;
+  onEvent?: (event: Record<string, unknown>) => void;
 };
 
 const GRADE_NAMES = [

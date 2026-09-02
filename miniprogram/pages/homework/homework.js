@@ -57,15 +57,19 @@ Page({
     if (!this.data.imagePath) return;
     this.setData({ recognizing: true });
     try {
+      console.log("[homework_recognition_started]", { transport: require("../../config").transport });
       const imagePath = await compress(this.data.imagePath);
       const imageDataUrl = await readImageDataUrl(imagePath);
+      console.log("[homework_recognition_image_ready]", { imageDataUrlLength: imageDataUrl.length });
       if (imageDataUrl.length > 95_000) throw new Error("图片过大，请裁剪作业区域后重试");
       const review = await api.request("POST", "/homework-reviews", {
         childProfileId: this.data.childId,
         imageDataUrl,
       });
+      console.log("[homework_recognition_succeeded]", { questionCount: review.candidates ? review.candidates.length : 0 });
       this.setData({ review });
     } catch (error) {
+      console.error("[homework_recognition_failed]", { errorMessage: error && error.message ? String(error.message).slice(0, 300) : "" });
       wx.showModal({ title: "作业识别失败", content: `${error.message || "请重试"}。也可以手动录入。`, confirmText: "手动录入", cancelText: "重试", success: (result) => { if (result.confirm) this.clearImage(); } });
     } finally { this.setData({ recognizing: false }); }
   },
