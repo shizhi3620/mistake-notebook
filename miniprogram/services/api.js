@@ -66,6 +66,7 @@ function sendRequest(options) {
       method: options.method,
       data: options.data,
       header: {
+        "content-type": "application/json",
         "X-WX-SERVICE": config.containerService,
         ...options.header,
       },
