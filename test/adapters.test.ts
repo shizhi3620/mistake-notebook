@@ -200,7 +200,7 @@ test("the recognition client sends the image and validates the structured result
   assert.deepEqual(recognition, recognitionJson);
   const body = calls[0]!.init.body as string;
   assert.match(body, /data:image\/jpeg;base64,QUJD/);
-  assert.equal(JSON.parse(body).max_tokens, 600);
+  assert.equal(JSON.parse(body).max_tokens, 1000);
 
   const fencedRecognition = createOpenAiCompatibleRecognitionClient({
     baseUrl: "https://llm.example.com",

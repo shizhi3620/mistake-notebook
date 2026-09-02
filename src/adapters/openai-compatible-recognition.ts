@@ -6,7 +6,7 @@ import type { OpenAiCompatibleAdapterOptions } from "./openai-compatible-explana
 import { modelResponseMetadata, parseModelJson } from "./openai-json.ts";
 
 const SYSTEM_PROMPT = `你是数学题图片识别助手。从用户上传的图片中识别唯一一道数学题。\
-只输出一个 JSON 对象，不要输出任何其他文字。字段：
+只输出一个 JSON 对象，不要输出任何其他文字或解释；所有字段尽量简短，禁止输出分析过程。字段：
 - "stem": 识别出的题干文字，数学符号用纯文本表示。
 - "formulas": 字符串数组，列出题干中的公式；没有则为空数组。
 - "confidence": 0 到 1 的数字，表示识别置信度；图片模糊、题干不完整或被遮挡时应低于 0.6。
@@ -35,7 +35,7 @@ export function createOpenAiCompatibleRecognitionClient(
       },
       body: JSON.stringify({
         model: options.model,
-        max_tokens: 600,
+        max_tokens: 1000,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
