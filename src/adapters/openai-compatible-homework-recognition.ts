@@ -1,5 +1,6 @@
 import type { HomeworkRecognition } from "../learning-loop.ts";
 import type { OpenAiCompatibleAdapterOptions } from "./openai-compatible-explanation.ts";
+import { modelResponseMetadata, parseModelJson } from "./openai-json.ts";
 
 const PROMPT = `你是中国数学作业批改助手。识别图片中每一道清晰可见的数学题及学生作答，并只输出 JSON 对象：
 {"questions":[{"stem":"题干","studentAnswer":"学生答案或null","studentAnswerConfidence":0到1或null,"verdict":"correct|incorrect|uncertain","confidence":0到1,"answerSource":"ai","referenceAnswer":"参考答案或null","reasoning":"简短理由或null","suggestedPrimaryKnowledgePoint":"知识点或null","suggestedSecondaryKnowledgePoints":[],"suggestedMistakeCause":"错因或null"}]}
@@ -24,9 +25,11 @@ export function createOpenAiCompatibleHomeworkRecognitionClient(options: OpenAiC
     }
     options.onEvent?.({ event: "vision_provider_response", kind: "homework_page", attempt: 1, status: response.status, durationMs: Date.now() - startedAt, retryAfter: response.headers.get("retry-after") ?? "" });
     if (!response.ok) throw new Error(`Recognition request failed with status ${response.status}.`);
-    const content = (await response.json() as any)?.choices?.[0]?.message?.content;
+    const payload = await response.json() as any;
+    const content = payload?.choices?.[0]?.message?.content;
+    options.onEvent?.({ event: "vision_provider_payload", kind: "homework_page", ...modelResponseMetadata(payload) });
     let parsed: any;
-    try { parsed = JSON.parse(content); } catch { options.onEvent?.({ event: "vision_provider_invalid_payload", kind: "homework_page", reason: "invalid_json" }); throw new Error("Recognition provider returned invalid JSON."); }
+    try { parsed = parseModelJson(content); } catch (error) { options.onEvent?.({ event: "vision_provider_invalid_payload", kind: "homework_page", reason: "invalid_json", errorMessage: error instanceof Error ? error.message : "unknown error" }); throw new Error("Recognition provider returned invalid JSON."); }
     if (!Array.isArray(parsed?.questions) || parsed.questions.length === 0 || parsed.questions.length > 20) throw new Error("Recognition provider returned an invalid homework payload.");
     const questions = parsed.questions.map((question: any) => ({
       stem: typeof question.stem === "string" ? question.stem : "",

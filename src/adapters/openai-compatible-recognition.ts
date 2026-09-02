@@ -3,6 +3,7 @@ import type {
   QuestionRecognition,
 } from "../learning-loop.ts";
 import type { OpenAiCompatibleAdapterOptions } from "./openai-compatible-explanation.ts";
+import { modelResponseMetadata, parseModelJson } from "./openai-json.ts";
 
 const SYSTEM_PROMPT = `你是数学题图片识别助手。从用户上传的图片中识别唯一一道数学题。\
 只输出一个 JSON 对象，不要输出任何其他文字。字段：
@@ -68,16 +69,13 @@ export function createOpenAiCompatibleRecognitionClient(
 
     const payload = (await response.json()) as any;
     const text = payload?.choices?.[0]?.message?.content;
-
-    if (typeof text !== "string") {
-      throw new Error("Recognition provider returned an invalid payload.");
-    }
+    options.onEvent?.({ event: "vision_provider_payload", kind: "single_question", ...modelResponseMetadata(payload) });
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(text);
-    } catch {
-      options.onEvent?.({ event: "vision_provider_invalid_payload", kind: "single_question", reason: "invalid_json" });
+      parsed = parseModelJson(text);
+    } catch (error) {
+      options.onEvent?.({ event: "vision_provider_invalid_payload", kind: "single_question", reason: "invalid_json", errorMessage: error instanceof Error ? error.message : "unknown error" });
       throw new Error("Recognition provider returned invalid JSON.");
     }
 

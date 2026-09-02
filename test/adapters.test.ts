@@ -202,6 +202,19 @@ test("the recognition client sends the image and validates the structured result
   assert.match(body, /data:image\/jpeg;base64,QUJD/);
   assert.equal(JSON.parse(body).max_tokens, 600);
 
+  const fencedRecognition = createOpenAiCompatibleRecognitionClient({
+    baseUrl: "https://llm.example.com",
+    apiKey: "test-key",
+    model: "vision-model",
+    fetchImpl: fakeFetch(() => ({
+      body: { choices: [{ message: { content: `\`\`\`json\n${JSON.stringify(recognitionJson)}\n\`\`\`` } }] },
+    })).fetchImpl,
+  });
+  assert.deepEqual(
+    await fencedRecognition({ imageDataUrl: "data:image/jpeg;base64,QUJD" }),
+    recognitionJson,
+  );
+
   const lowConfidence = createOpenAiCompatibleRecognitionClient({
     baseUrl: "https://llm.example.com",
     apiKey: "test-key",
