@@ -80,11 +80,25 @@ Page({
           fail: reject,
         });
       });
+      const temporaryUrl = await new Promise((resolve, reject) => {
+        wx.cloud.getTempFileURL({
+          fileList: [upload.fileID],
+          success: (result) => {
+            const file = result.fileList && result.fileList[0];
+            if (!file || file.status !== 0 || !file.tempFileURL) {
+              reject(new Error("无法获取图片临时地址"));
+              return;
+            }
+            resolve(file.tempFileURL);
+          },
+          fail: reject,
+        });
+      });
       const photoPayload = {
         uploadToken: credential.uploadToken,
         fileId: upload.fileID,
         imageKey: credential.imageKey,
-        ...(config.transport === "https" ? { imageDataUrl } : {}),
+        ...(config.transport === "https" ? { imageDataUrl } : { imageUrl: temporaryUrl }),
       };
       const recognized = await api.request("POST", `/drafts/${draft.id}/photo`, photoPayload);
       wx.setStorageSync("currentDraft", recognized);
