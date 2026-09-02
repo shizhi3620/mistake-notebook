@@ -45,12 +45,13 @@ export type LearningLoopServerDependencies = {
 };
 
 export type HttpRequestLogEvent = {
-  event: "http_request";
-  requestId: string;
-  method: string;
-  path: string;
-  status: number;
-  durationMs: number;
+  event: string;
+  requestId: string | number | string[];
+  method?: string;
+  path?: string;
+  status?: number;
+  durationMs?: number;
+  [key: string]: unknown;
 };
 
 export class AiRateLimiter {
@@ -224,6 +225,14 @@ export function createLearningLoopServer(
     const body = await readJsonBody(request);
 
     if (method === "POST" && route === "/session") {
+      log({
+        event: "wechat_session_request",
+        requestId: String(response.getHeader("x-request-id") ?? ""),
+        contentType: request.headers["content-type"] ?? null,
+        bodyPresent: Boolean(body),
+        bodyKeys: body && typeof body === "object" ? Object.keys(body) : [],
+        codePresent: Boolean(body && typeof body === "object" && body.code),
+      });
       if (!weChatIdentityResolver) {
         throw new Error("WeChat login is not configured.");
       }
@@ -421,6 +430,15 @@ export function createLearningLoopServer(
     }
     const draftPhotoMatch = match(route, "/drafts/:id/photo");
     if (method === "POST" && draftPhotoMatch) {
+      log({
+        event: "photo_recognition_request",
+        requestId: String(response.getHeader("x-request-id") ?? ""),
+        hasUploadToken: Boolean(body?.uploadToken),
+        hasFileId: Boolean(body?.fileId),
+        hasImageDataUrl: typeof body?.imageDataUrl === "string" && body.imageDataUrl.length > 0,
+        imageDataUrlLength: typeof body?.imageDataUrl === "string" ? body.imageDataUrl.length : 0,
+        hasImageUrl: typeof body?.imageUrl === "string" && body.imageUrl.length > 0,
+      });
       if (body?.fileId && body?.uploadToken) {
         const credential = await learningLoop.getPhotoUploadCredentialAsync(
           auth,
