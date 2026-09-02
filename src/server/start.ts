@@ -94,7 +94,9 @@ const recognitionClient = deepSeekApiKey
       baseUrl: process.env.LLM_BASE_URL ?? "https://api.deepseek.com",
       apiKey: deepSeekApiKey,
       model: process.env.RECOGNITION_MODEL ?? "deepseek-v4-flash-vision-exp",
-      timeoutMs: 27_000,
+      // wx.cloud.callContainer has a 15-second client limit. Leave room for
+      // Cloud Hosting routing and the response so the client receives a retryable error.
+      timeoutMs: 11_000,
       maxRetries: 0,
     })
   : undefined;
@@ -103,7 +105,7 @@ const homeworkRecognitionClient = deepSeekApiKey
       baseUrl: process.env.LLM_BASE_URL ?? "https://api.deepseek.com",
       apiKey: deepSeekApiKey,
       model: process.env.HOMEWORK_RECOGNITION_MODEL ?? process.env.RECOGNITION_MODEL ?? "deepseek-v4-flash-vision-exp",
-      timeoutMs: 14_000,
+      timeoutMs: 11_000,
       maxRetries: 0,
     })
   : undefined;
