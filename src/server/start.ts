@@ -5,6 +5,7 @@ loadDotEnv();
 
 import { createOpenAiCompatibleExplanationProvider } from "../adapters/openai-compatible-explanation.ts";
 import { createOpenAiCompatibleRecognitionClient } from "../adapters/openai-compatible-recognition.ts";
+import { createOpenAiCompatibleHomeworkRecognitionClient } from "../adapters/openai-compatible-homework-recognition.ts";
 import { createWeChatIdentityResolver } from "../adapters/wechat-login.ts";
 import { createWeChatSubscriptionReminderSender } from "../adapters/wechat-subscription-reminder.ts";
 import { createCloudBaseNodeStorageVerifier } from "../adapters/cloudbase-storage.ts";
@@ -97,6 +98,15 @@ const recognitionClient = deepSeekApiKey
       maxRetries: 0,
     })
   : undefined;
+const homeworkRecognitionClient = deepSeekApiKey
+  ? createOpenAiCompatibleHomeworkRecognitionClient({
+      baseUrl: process.env.LLM_BASE_URL ?? "https://api.deepseek.com",
+      apiKey: deepSeekApiKey,
+      model: process.env.HOMEWORK_RECOGNITION_MODEL ?? process.env.RECOGNITION_MODEL ?? "deepseek-v4-flash-vision-exp",
+      timeoutMs: 14_000,
+      maxRetries: 0,
+    })
+  : undefined;
 
 const learningStore = mysqlPool
   ? new MysqlLearningLoopStore(mysqlPool)
@@ -134,6 +144,7 @@ const server = createLearningLoopServer({
   idempotencyStore: mysqlPool ? new MysqlIdempotencyStore(mysqlPool) : undefined,
   photoStorage,
   recognitionClient,
+  homeworkRecognitionClient,
   reminderSchedulerSecret,
   feedbackOperatorSecret: process.env.FEEDBACK_OPERATOR_SECRET?.trim() || undefined,
   feedbackOperatorId: process.env.FEEDBACK_OPERATOR_ID?.trim() || "feedback-operator",

@@ -1,1 +1,3 @@
 /* 批改页样式复用 app.wxss 共享类 */
+.preview { max-height: 620rpx; overflow: hidden; margin-bottom: 20rpx; border: 1rpx solid #e6e8eb; }
+.preview image { width: 100%; display: block; }

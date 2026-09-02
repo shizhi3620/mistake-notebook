@@ -11,6 +11,8 @@ Page({
     questions: [{ stem: "", studentAnswer: "", verdictIndex: 2 }],
     saving: false,
     verdicts: VERDICTS,
+    imagePath: "",
+    recognizing: false,
   },
 
   async onLoad() {
@@ -37,6 +39,35 @@ Page({
 
   addQuestion() {
     this.setData({ questions: this.data.questions.concat({ stem: "", studentAnswer: "", verdictIndex: 2 }) });
+  },
+
+  chooseImage(event) {
+    wx.chooseMedia({
+      count: 1,
+      mediaType: ["image"],
+      sourceType: [event.currentTarget.dataset.source],
+      success: (result) => this.setData({ imagePath: result.tempFiles[0].tempFilePath }),
+      fail: () => wx.showToast({ title: "未选择图片", icon: "none" }),
+    });
+  },
+
+  clearImage() { this.setData({ imagePath: "" }); },
+
+  async recognizeImage() {
+    if (!this.data.imagePath) return;
+    this.setData({ recognizing: true });
+    try {
+      const imagePath = await compress(this.data.imagePath);
+      const imageDataUrl = await readImageDataUrl(imagePath);
+      if (imageDataUrl.length > 95_000) throw new Error("图片过大，请裁剪作业区域后重试");
+      const review = await api.request("POST", "/homework-reviews", {
+        childProfileId: this.data.childId,
+        imageDataUrl,
+      });
+      this.setData({ review });
+    } catch (error) {
+      wx.showModal({ title: "作业识别失败", content: `${error.message || "请重试"}。也可以手动录入。`, confirmText: "手动录入", cancelText: "重试", success: (result) => { if (result.confirm) this.clearImage(); } });
+    } finally { this.setData({ recognizing: false }); }
   },
 
   async createReview() {
@@ -96,3 +127,11 @@ Page({
 
   finish() { wx.navigateBack(); },
 });
+
+function compress(src) {
+  return new Promise((resolve) => wx.compressImage({ src, quality: 30, compressedWidth: 768, success: (result) => resolve(result.tempFilePath), fail: () => resolve(src) }));
+}
+
+function readImageDataUrl(filePath) {
+  return new Promise((resolve, reject) => wx.getFileSystemManager().readFile({ filePath, encoding: "base64", success: (result) => resolve(`data:image/jpeg;base64,${result.data}`), fail: reject }));
+}

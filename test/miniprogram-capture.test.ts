@@ -33,6 +33,9 @@ test("capture page compresses, uploads, and submits the selected image", async (
         uploaded = true;
         success({ fileID: "cloud://env/questions/draft-1/photo-1" });
       },
+      getTempFileURL: ({ success }: any) => {
+        success({ fileList: [{ status: 0, tempFileURL: "https://storage.example/photo.jpg" }] });
+      },
     },
     setStorageSync: () => {},
     navigateTo: ({ url }: any) => {

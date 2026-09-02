@@ -36,6 +36,7 @@ export type LearningLoopServerDependencies = {
   recognitionClient?: (input: {
     imageDataUrl: string;
   }) => Promise<QuestionRecognition>;
+  homeworkRecognitionClient?: (input: { imageDataUrl: string }) => Promise<import("../learning-loop.ts").HomeworkRecognition>;
   maxAiRequestsPerMinute?: number;
   maxAiRequestsPerMonth?: number;
   reminderSchedulerSecret?: string;
@@ -87,7 +88,7 @@ export class AiUsageLedger {
 export function createLearningLoopServer(
   dependencies: LearningLoopServerDependencies,
 ): Server {
-  const { learningLoop, recognitionClient, weChatIdentityResolver, photoStorage, healthCheck } = dependencies;
+  const { learningLoop, recognitionClient, homeworkRecognitionClient, weChatIdentityResolver, photoStorage, healthCheck } = dependencies;
   const log = dependencies.log ?? (() => {});
   const maxAiRequestsPerMinute = Math.max(1, dependencies.maxAiRequestsPerMinute ?? 30);
   const aiRateLimiter = new AiRateLimiter(maxAiRequestsPerMinute);
@@ -330,6 +331,10 @@ export function createLearningLoopServer(
       );
     }
     if (method === "POST" && route === "/homework-reviews") {
+      if (body?.imageDataUrl && homeworkRecognitionClient) {
+        const recognition = await homeworkRecognitionClient({ imageDataUrl: String(body.imageDataUrl) });
+        return send(response, 200, await learningLoop.createHomeworkReviewAsync(auth, String(body?.childProfileId), recognition));
+      }
       return send(
         response,
         200,

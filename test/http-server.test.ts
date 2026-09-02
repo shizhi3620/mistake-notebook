@@ -399,8 +399,9 @@ test("operations endpoints expose health and redact request logs", async () => {
       body: JSON.stringify({ code: "sensitive-wechat-code" }),
     });
 
-    assert.equal(events.length, 2);
-    assert.equal(events[1]?.path, "/api/session");
+    assert.equal(events.length, 4);
+    assert.equal(events.filter((event) => event.path === "/api/session").length, 2);
+    assert.equal(events.find((event) => event.event === "request_error")?.path, "/api/session");
     assert.equal(JSON.stringify(events).includes("sensitive-wechat-code"), false);
   } finally {
     server.close();

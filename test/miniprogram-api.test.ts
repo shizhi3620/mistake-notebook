@@ -32,7 +32,7 @@ test("the release API client calls Cloud Hosting with the API path and service h
     config: { env: "prod-d8giqy4sjc5925f68" },
     path: "/api/home",
     method: "GET",
-    header: { "X-WX-SERVICE": "ctb" },
+    header: { "content-type": "application/json", "X-WX-SERVICE": "ctb" },
   });
 });
 
@@ -91,6 +91,7 @@ test("the Cloud Hosting API client preserves session and idempotency headers", a
 
   assert.deepEqual(await api.request("POST", "/feedback", { type: "feature" }, { idempotencyKey: "feedback-1" }), { ok: true });
   assert.deepEqual(JSON.parse(JSON.stringify(calls[0]?.header)), {
+    "content-type": "application/json",
     "X-WX-SERVICE": "ctb",
     authorization: "Bearer saved-token",
     "Idempotency-Key": "feedback-1",

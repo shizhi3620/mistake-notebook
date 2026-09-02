@@ -2,8 +2,15 @@
   <view wx:if="{{loading}}" class="muted">加载中…</view>
   <block wx:elif="{{!review}}">
     <view class="card">
-      <view class="card-title">录入作业题</view>
-      <view class="muted" style="margin-bottom: 16rpx">可先手动录入多道题，后续可接入整页图片识别。</view>
+      <view class="card-title">拍照批改作业</view>
+      <view class="muted" style="margin-bottom: 16rpx">选择一页作业图片，识别结果需逐题确认后才会进入错题本。</view>
+      <view wx:if="{{imagePath}}" class="preview"><image src="{{imagePath}}" mode="widthFix" /></view>
+      <view class="row" wx:if="{{!imagePath}}"><button class="btn btn-primary" style="flex:1;margin-right:8rpx" data-source="camera" bindtap="chooseImage">拍照</button><button class="btn btn-plain" style="flex:1" data-source="album" bindtap="chooseImage">从相册选择</button></view>
+      <view class="row" wx:else><button class="btn btn-plain" style="flex:1;margin-right:8rpx" bindtap="clearImage">重选</button><button class="btn btn-primary" style="flex:1" disabled="{{recognizing}}" bindtap="recognizeImage">{{recognizing ? '识别中…' : '识别作业'}}</button></view>
+    </view>
+    <view class="card">
+      <view class="card-title">手动录入</view>
+      <view class="muted" style="margin-bottom: 16rpx">图片不清晰或识别失败时，可手动录入多道题。</view>
       <view wx:for="{{questions}}" wx:key="index" class="card" style="margin: 16rpx 0; background: #f8f9fa">
         <view class="label">第 {{index + 1}} 题</view>
         <input class="input" data-index="{{index}}" data-field="stem" placeholder="题干" value="{{item.stem}}" bindinput="onQuestionInput" />
