@@ -29,6 +29,8 @@ export type LearningLoopServerDependencies = {
       fileId: string;
       expectedImageKey: string;
     }): Promise<{ imageUrl: string }>;
+    getTemporaryUrl(fileId: string): Promise<string>;
+    deleteUploadedFile(fileId: string): Promise<void>;
   };
   log?: (event: HttpRequestLogEvent) => void;
   weChatIdentityResolver?: (
@@ -46,6 +48,7 @@ export type LearningLoopServerDependencies = {
   idempotencyStore?: IdempotencyStore;
   recognitionTaskStore?: RecognitionTaskStore;
   triggerRecognitionTask?: (taskId: string) => Promise<void>;
+  recognitionWorkerSecret?: string;
 };
 
 export type HttpRequestLogEvent = {
@@ -203,6 +206,42 @@ export function createLearningLoopServer(
       await send(response, 200, {
         outcomes: await learningLoop.dispatchDueRemindersAsync(),
       });
+      return;
+    }
+
+    if (path.startsWith("/internal/recognition-tasks/")) {
+      const configuredSecret = dependencies.recognitionWorkerSecret;
+      const suppliedSecret = String(request.headers["x-recognition-worker-secret"] ?? "");
+      const expected = Buffer.from(configuredSecret ?? "");
+      const supplied = Buffer.from(suppliedSecret);
+      if (!configuredSecret || expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) {
+        await send(response, 401, { error: "Unauthorized." });
+        return;
+      }
+      if (!photoStorage || !dependencies.recognitionTaskStore) {
+        await send(response, 503, { error: "storage_unavailable" });
+        return;
+      }
+      const temporaryUrlMatch = match(path.replace(/^\/internal/, ""), "/recognition-tasks/:id/image-url");
+      if (method === "POST" && temporaryUrlMatch) {
+        const task = await dependencies.recognitionTaskStore.findById(temporaryUrlMatch.id);
+        if (!task || task.imageDeletedAt !== null || task.imageExpiresAt <= Date.now()) {
+          await send(response, 404, { error: "Not found." });
+          return;
+        }
+        await send(response, 200, { imageUrl: await photoStorage.getTemporaryUrl(task.imageKey) });
+        return;
+      }
+      if (method === "POST" && path === "/internal/recognition-tasks/cleanup-images") {
+        const imageKeys = await dependencies.recognitionTaskStore.findExpiredImages(Date.now());
+        for (const imageKey of imageKeys) {
+          await photoStorage.deleteUploadedFile(imageKey);
+          await dependencies.recognitionTaskStore.markImageDeleted(imageKey);
+        }
+        await send(response, 200, { deletedCount: imageKeys.length });
+        return;
+      }
+      await send(response, 404, { error: "Not found." });
       return;
     }
 

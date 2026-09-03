@@ -13,7 +13,7 @@
 
 ## Worker 环境变量
 
-Worker 需要与云托管使用同一生产 MySQL、对象存储环境和 DeepSeek 密钥：`MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_DATABASE`、`MYSQL_USER`、`MYSQL_PASSWORD`、`MYSQL_SSL`、`CLOUDBASE_ENV`、`CLOUDBASE_REGION`、`CLOUDBASE_SECRET_ID`、`CLOUDBASE_SECRET_KEY`、`DEEPSEEK_API_KEY`、`LLM_BASE_URL`、`RECOGNITION_MODEL`、`HOMEWORK_RECOGNITION_MODEL`。后两项为 SCF 调用 CloudBase Node SDK 所需的 CAM 子账号凭据；SCF 不允许使用 `TENCENTCLOUD_` 前缀环境变量。
+Worker 需要与云托管使用同一生产 MySQL 和 DeepSeek 配置：`MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_DATABASE`、`MYSQL_USER`、`MYSQL_PASSWORD`、`MYSQL_SSL`、`DEEPSEEK_API_KEY`、`LLM_BASE_URL`、`RECOGNITION_MODEL`、`HOMEWORK_RECOGNITION_MODEL`。对象存储由 `ctb` 代管：在 `ctb` 与 Worker 配置同一强随机值 `RECOGNITION_WORKER_SECRET`，并仅在 Worker 配置 `RECOGNITION_IMAGE_API_BASE_URL`（`ctb` 可访问 HTTPS 地址）。Worker 不配置 CloudBase 或 CAM 对象存储凭据。
 
 Worker 的 CAM 角色仅授予读取本应用图片对象、访问应用 MySQL，以及异步重投递自身函数所需的 `scf:InvokeFunction` 权限。日志只记录任务 ID、状态、重试次数和耗时，不记录临时 URL、图片内容、openid、微信 code 或密钥。
 

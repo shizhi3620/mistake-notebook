@@ -174,6 +174,7 @@ const server = createLearningLoopServer({
     // Local development intentionally runs synchronously; Cloud Hosting never does.
     await processRecognitionTask({ taskId, taskStore: recognitionTaskStore, resolveImageUrl: photoStorage.getTemporaryUrl, recognizeQuestion: recognitionClient, recognizeHomework: homeworkRecognitionClient, log: logEvent });
   },
+  recognitionWorkerSecret: process.env.RECOGNITION_WORKER_SECRET?.trim() || undefined,
   reminderSchedulerSecret,
   feedbackOperatorSecret: process.env.FEEDBACK_OPERATOR_SECRET?.trim() || undefined,
   feedbackOperatorId: process.env.FEEDBACK_OPERATOR_ID?.trim() || "feedback-operator",

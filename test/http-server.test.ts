@@ -460,6 +460,8 @@ test("the HTTP API accepts a CloudBase file ID only after an upload credential",
         assert.equal(fileId, `cloud://prod/${expectedImageKey}`);
         return { imageUrl: "https://storage.example/photo.jpg" };
       },
+      getTemporaryUrl: async () => "https://storage.example/photo.jpg",
+      deleteUploadedFile: async () => {},
     },
     recognitionClient: async ({ imageDataUrl }) => {
       assert.equal(imageDataUrl, "data:image/jpeg;base64,QUJD");
