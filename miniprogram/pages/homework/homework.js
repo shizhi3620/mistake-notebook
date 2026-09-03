@@ -58,6 +58,7 @@ Page({
     this.setData({ recognizing: true });
     try {
       console.log("[homework_recognition_started]", { transport: require("../../config").transport });
+      const imagePath = await compressForContainer(this.data.imagePath);
       const upload = await new Promise((resolve, reject) => wx.cloud.uploadFile({ cloudPath: `homework/${Date.now()}.jpg`, filePath: imagePath, success: resolve, fail: reject }));
       const temporary = await new Promise((resolve, reject) => wx.cloud.getTempFileURL({ fileList: [upload.fileID], success: (value) => value.fileList?.[0]?.tempFileURL ? resolve(value.fileList[0].tempFileURL) : reject(new Error("无法获取图片临时地址")), fail: reject }));
       console.log("[homework_recognition_image_ready]", { hasFileId: Boolean(upload.fileID), hasTemporaryUrl: Boolean(temporary) });
