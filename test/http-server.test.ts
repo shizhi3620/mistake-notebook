@@ -51,7 +51,8 @@ test("a guardian can create and query an asynchronous recognition task but anoth
     const firstToken = first.body.session.token as string;
     await api.call("POST", "/guardianship/confirm", { token: firstToken });
     const child = await api.call("POST", "/children", { token: firstToken, body: { nickname: "小明", grade: 3 } });
-    const task = await api.call("POST", "/recognition-tasks", { token: firstToken, idempotencyKey: "task-key", body: { childProfileId: child.body.id, kind: "single_question", imageKey: "cloud://image", imageUrl: "https://example.com/image.jpg" } });
+    const credential = await api.call("POST", "/homework-upload-credential", { token: firstToken, body: { childProfileId: child.body.id } });
+    const task = await api.call("POST", "/recognition-tasks", { token: firstToken, idempotencyKey: "task-key", body: { childProfileId: child.body.id, kind: "homework_page", uploadToken: credential.body.uploadToken, fileId: `cloud://test/${credential.body.imageKey}` } });
     assert.equal(task.status, 202);
     assert.equal(task.body.status, "pending");
     const own = await api.call("GET", `/recognition-tasks/${task.body.taskId}`, { token: firstToken });

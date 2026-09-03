@@ -24,6 +24,7 @@ import { createLearningLoopServer } from "./http-server.ts";
 import { MysqlIdempotencyStore } from "./idempotency-store.ts";
 import { MysqlRecognitionTaskStore, InMemoryRecognitionTaskStore } from "../adapters/recognition-task-store.ts";
 import { processRecognitionTask } from "./recognition-worker.ts";
+import { createTencentScfInvoker } from "../adapters/tencent-scf-invoker.ts";
 
 const deepSeekApiKey = process.env.DEEPSEEK_API_KEY;
 const logEvent = (event: Record<string, unknown>) => console.log(JSON.stringify(event));
@@ -145,6 +146,14 @@ const learningLoop = new LearningLoop(learningStore, {
   reminderSender,
 });
 const recognitionTaskStore = mysqlPool ? new MysqlRecognitionTaskStore(mysqlPool) : new InMemoryRecognitionTaskStore();
+const scfInvoker = process.env.CLOUD_HOSTING === "true"
+  ? createTencentScfInvoker({
+      secretId: requiredEnvironment("TENCENTCLOUD_SECRETID"),
+      secretKey: requiredEnvironment("TENCENTCLOUD_SECRETKEY"),
+      region: requiredEnvironment("SCF_REGION"),
+      functionName: requiredEnvironment("RECOGNITION_WORKER_FUNCTION_NAME"),
+    })
+  : undefined;
 
 const server = createLearningLoopServer({
   learningLoop,
@@ -156,8 +165,10 @@ const server = createLearningLoopServer({
   recognitionTaskStore,
   triggerRecognitionTask: async (taskId) => {
     if (!recognitionClient || !homeworkRecognitionClient) throw new Error("recognition_unavailable");
-    // In production this same handler is invoked by SCF; local development runs it in-process.
-    await processRecognitionTask({ taskId, taskStore: recognitionTaskStore, recognizeQuestion: recognitionClient, recognizeHomework: homeworkRecognitionClient });
+    if (scfInvoker) return scfInvoker(taskId);
+    if (!photoStorage) throw new Error("recognition storage is not configured");
+    // Local development intentionally runs synchronously; Cloud Hosting never does.
+    await processRecognitionTask({ taskId, taskStore: recognitionTaskStore, resolveImageUrl: photoStorage.getTemporaryUrl, recognizeQuestion: recognitionClient, recognizeHomework: homeworkRecognitionClient, log: logEvent });
   },
   reminderSchedulerSecret,
   feedbackOperatorSecret: process.env.FEEDBACK_OPERATOR_SECRET?.trim() || undefined,

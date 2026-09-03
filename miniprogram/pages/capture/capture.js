@@ -7,6 +7,7 @@ Page({
     rotationDegrees: 0,
     source: "camera",
     uploading: false,
+    taskId: "",
   },
 
   chooseImage(event) {
@@ -40,7 +41,8 @@ Page({
   },
 
   reselect() {
-    this.setData({ imagePath: "", rotationDegrees: 0 });
+    this.stopPolling();
+    this.setData({ imagePath: "", rotationDegrees: 0, taskId: "" });
   },
 
   manualEntry() {
@@ -71,7 +73,6 @@ Page({
         `/drafts/${draft.id}/photo-credential`,
       );
       const recognitionImagePath = await compressForRecognition(this.data.imagePath);
-      const imageDataUrl = await readImageDataUrl(recognitionImagePath);
       const upload = await new Promise((resolve, reject) => {
         wx.cloud.uploadFile({
           cloudPath: credential.imageKey,
@@ -80,35 +81,16 @@ Page({
           fail: reject,
         });
       });
-      const temporaryUrl = await new Promise((resolve, reject) => {
-        wx.cloud.getTempFileURL({
-          fileList: [upload.fileID],
-          success: (result) => {
-            const file = result.fileList && result.fileList[0];
-            if (!file || file.status !== 0 || !file.tempFileURL) {
-              reject(new Error("无法获取图片临时地址"));
-              return;
-            }
-            resolve(file.tempFileURL);
-          },
-          fail: reject,
-        });
-      });
       console.log("[photo_upload_ready]", {
         hasFileId: Boolean(upload.fileID),
-        hasTemporaryUrl: Boolean(temporaryUrl),
-        temporaryUrlLength: temporaryUrl ? temporaryUrl.length : 0,
         transport: config.transport,
       });
-      const photoPayload = { childProfileId: overview.child.id, draftId: draft.id, kind: "single_question", imageKey: credential.imageKey, imageUrl: temporaryUrl, idempotencyKey: `${draft.id}-${Date.now()}` };
-      console.log("[photo_recognition_submit]", {
-        hasImageUrl: Boolean(photoPayload.imageUrl),
-      });
+      const photoPayload = { childProfileId: overview.child.id, draftId: draft.id, kind: "single_question", fileId: upload.fileID, uploadToken: credential.uploadToken, idempotencyKey: `${draft.id}-${Date.now()}` };
       const task = await api.request("POST", "/recognition-tasks", photoPayload);
-      const result = await waitForRecognition(task.taskId);
-      const recognized = await api.request("POST", `/drafts/${draft.id}/recognition`, { recognition: result });
-      wx.setStorageSync("currentDraft", recognized);
-      wx.navigateTo({ url: `/pages/confirm/confirm?draftId=${draft.id}` });
+      this.setData({ taskId: task.taskId });
+      wx.setStorageSync("captureRecognitionTask", { taskId: task.taskId, draftId: draft.id, expiresAt: Date.now() + 60_000 });
+      const result = await this.waitForRecognition(task.taskId);
+      await this.completeRecognition(draft.id, result);
     } catch (error) {
       wx.showModal({
         title: "上传或识别失败",
@@ -116,7 +98,9 @@ Page({
         confirmText: "重试",
         cancelText: "手动录入",
         success: (res) => {
-          if (!res.confirm) {
+          if (res.confirm) {
+            this.upload();
+          } else {
             this.manualEntry();
           }
         },
@@ -124,6 +108,23 @@ Page({
     } finally {
       this.setData({ uploading: false });
     }
+  },
+  onShow() {
+    const saved = wx.getStorageSync("captureRecognitionTask");
+    if (saved && saved.expiresAt > Date.now() && !this.data.uploading) this.waitForRecognition(saved.taskId).then((result) => this.completeRecognition(saved.draftId, result)).catch(() => {});
+  },
+  onUnload() { this.stopPolling(); },
+  stopPolling() { this.polling = false; },
+  async waitForRecognition(taskId) {
+    this.stopPolling(); this.polling = true;
+    try { return await waitForRecognition(taskId, () => this.polling); }
+    finally { this.polling = false; }
+  },
+  async completeRecognition(draftId, result) {
+    const recognized = await api.request("POST", `/drafts/${draftId}/recognition`, { recognition: result });
+    if (wx.removeStorageSync) wx.removeStorageSync("captureRecognitionTask");
+    wx.setStorageSync("currentDraft", recognized);
+    wx.navigateTo({ url: `/pages/confirm/confirm?draftId=${draftId}` });
   },
 });
 
@@ -139,26 +140,15 @@ function compressForRecognition(src) {
   });
 }
 
-async function waitForRecognition(taskId) {
+async function waitForRecognition(taskId, active = () => true) {
   const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
+  while (active() && Date.now() < deadline) {
     const task = await api.request("GET", `/recognition-tasks/${taskId}`);
     if (task.status === "succeeded") return task.result;
-    if (task.status === "failed") throw new Error(task.error === "recognition_busy" ? "识别服务繁忙，请重试" : "未识别到清晰的数学题，请重新拍摄或手动录入");
+    if (task.status === "failed") throw new Error(task.error === "recognition_busy" || task.error === "recognition_dispatch_failed" ? "识别服务繁忙，请重试" : "未识别到清晰的数学题，请重新拍摄或手动录入");
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   throw new Error("识别服务繁忙，请重试");
-}
-
-function readImageDataUrl(filePath) {
-  return new Promise((resolve, reject) => {
-    wx.getFileSystemManager().readFile({
-      filePath,
-      encoding: "base64",
-      success: (result) => resolve(`data:image/jpeg;base64,${result.data}`),
-      fail: reject,
-    });
-  });
 }
 
 function errorMessage(error) {

@@ -155,7 +155,9 @@ export function createLearningLoopServer(
     const path = url.pathname.replace(/\/+$/, "") || "/";
     const method = request.method ?? "GET";
 
-    const aiRoute = path.includes("/recognition") || path.endsWith("/explanation") || path.includes("/homework");
+    // Recognition task creation has durable, plan-based quota enforcement below.
+    // Keep the in-process limiter only for synchronous AI routes that still exist.
+    const aiRoute = method === "POST" && path.endsWith("/explanation");
     if (aiRoute) {
       const now = Date.now();
       const key = request.headers.authorization?.replace(/^Bearer\s+/i, "") || request.headers["x-forwarded-for"]?.toString().split(",")[0].trim() || request.socket.remoteAddress || "unknown";
@@ -334,15 +336,42 @@ export function createLearningLoopServer(
         ),
       );
     }
+    if (method === "POST" && route === "/homework-upload-credential") {
+      const childProfileId = String(body?.childProfileId ?? "");
+      if (!(await learningLoop.listChildProfilesAsync(auth)).some((child) => child.id === childProfileId)) throw new Error("Child profile was not found.");
+      const credential = await recognitionTaskStore.createHomeworkUploadCredential(auth, childProfileId);
+      return send(response, 200, { uploadToken: credential.uploadToken, imageKey: credential.imageKey, expiresAt: credential.expiresAt });
+    }
     if (method === "POST" && route === "/recognition-tasks") {
       const childProfileId = String(body?.childProfileId ?? "");
       if (!(await learningLoop.listChildProfilesAsync(auth)).some((child) => child.id === childProfileId)) throw new Error("Child profile was not found.");
       const kind = body?.kind === "homework_page" ? "homework_page" : body?.kind === "single_question" ? "single_question" : null;
-      const imageKey = String(body?.imageKey ?? "");
       const idempotencyKey = String(request.headers["idempotency-key"] ?? body?.idempotencyKey ?? "");
-      if (!kind || !imageKey || !idempotencyKey) throw new Error("Recognition task kind, image key and idempotency key are required.");
-      const task = await recognitionTaskStore.create({ parentAccountId: auth, childProfileId, draftId: typeof body?.draftId === "string" ? body.draftId : null, kind, imageKey, imageUrl: typeof body?.imageUrl === "string" ? body.imageUrl : null, idempotencyKey, expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 });
-      void dependencies.triggerRecognitionTask?.(task.id).catch(() => log({ event: "recognition_task_trigger_failed", requestId: String(response.getHeader("x-request-id") ?? ""), taskId: task.id }));
+      const fileId = String(body?.fileId ?? "");
+      if (!kind || !fileId || !idempotencyKey) throw new Error("Recognition task kind, uploaded file and idempotency key are required.");
+      let draftId: string | null = null;
+      if (kind === "single_question") {
+        draftId = String(body?.draftId ?? "");
+        const credential = await learningLoop.getPhotoUploadCredentialAsync(auth, String(body?.uploadToken ?? ""));
+        if (credential.draftId !== draftId) throw new Error("Upload credential is not available for this draft.");
+        assertCloudBaseFileOwnership(fileId, credential.imageKey);
+        await learningLoop.completePhotoUploadAsync(auth, credential.uploadToken, fileId);
+      } else {
+        const credential = await recognitionTaskStore.consumeHomeworkUploadCredential(auth, String(body?.uploadToken ?? ""), fileId);
+        if (credential.childProfileId !== childProfileId) throw new Error("Homework upload credential is not available for this child.");
+      }
+      const entitlements = await learningLoop.getEntitlementsAsync(auth);
+      let task = await recognitionTaskStore.create(
+        { parentAccountId: auth, childProfileId, draftId, kind, imageKey: fileId, idempotencyKey, expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 },
+        { startsAt: shanghaiMonthStart(Date.now()), remaining: Math.max(0, entitlements.monthlyPhotoQuota - entitlements.photosUsedThisMonth) },
+      );
+      try {
+        await dependencies.triggerRecognitionTask?.(task.id);
+      } catch {
+        await recognitionTaskStore.fail(task.id, "recognition_dispatch_failed");
+        log({ event: "recognition_task_trigger_failed", requestId: String(response.getHeader("x-request-id") ?? ""), taskId: task.id });
+        task = (await recognitionTaskStore.find(auth, task.id))!;
+      }
       return send(response, 202, taskView(task));
     }
     const draftRecognitionMatch = match(route, "/drafts/:id/recognition");
@@ -351,15 +380,15 @@ export function createLearningLoopServer(
     }
     const recognitionTaskMatch = match(route, "/recognition-tasks/:id");
     if (method === "GET" && recognitionTaskMatch) {
-      const task = await recognitionTaskStore.find(auth, recognitionTaskMatch.id);
+      let task = await recognitionTaskStore.find(auth, recognitionTaskMatch.id);
       if (!task) throw new Error("Recognition task was not found.");
+      if ((task.status === "pending" || task.status === "processing") && task.createdAt + 60_000 <= Date.now()) {
+        await recognitionTaskStore.fail(task.id, "recognition_busy");
+        task = (await recognitionTaskStore.find(auth, task.id))!;
+      }
       return send(response, 200, taskView(task));
     }
     if (method === "POST" && route === "/homework-reviews") {
-      if (body?.imageDataUrl && homeworkRecognitionClient) {
-        const recognition = await homeworkRecognitionClient({ imageDataUrl: String(body.imageDataUrl) });
-        return send(response, 200, await learningLoop.createHomeworkReviewAsync(auth, String(body?.childProfileId), recognition));
-      }
       return send(
         response,
         200,
@@ -854,4 +883,9 @@ function sanitizeErrorMessage(message: string): string {
 
 function taskView(task: RecognitionTask) {
   return { taskId: task.id, kind: task.kind, status: task.status, result: task.status === "succeeded" ? task.result : undefined, error: task.status === "failed" ? task.errorCode : undefined, expiresAt: task.expiresAt };
+}
+
+function shanghaiMonthStart(now: number): number {
+  const local = new Date(now + 8 * 60 * 60_000);
+  return Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), 1) - 8 * 60 * 60_000;
 }

@@ -40,6 +40,7 @@ test("capture page compresses, uploads, and submits the selected image", async (
       },
     },
     setStorageSync: () => {},
+    removeStorageSync: () => {},
     navigateTo: ({ url }: any) => {
       navigatedTo = url;
     },

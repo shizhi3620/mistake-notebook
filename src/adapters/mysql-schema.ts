@@ -185,6 +185,18 @@ const schemaStatements = [
     id CHAR(36) PRIMARY KEY, parent_account_id CHAR(36) NOT NULL, child_profile_id CHAR(36) NOT NULL, draft_id CHAR(36) NULL, kind VARCHAR(32) NOT NULL, image_key TEXT NOT NULL, image_url TEXT NULL, status VARCHAR(32) NOT NULL, attempts SMALLINT NOT NULL DEFAULT 0, result_json JSON NULL, error_code VARCHAR(64) NULL, idempotency_key VARCHAR(128) NOT NULL, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, expires_at BIGINT NOT NULL,
     UNIQUE KEY recognition_tasks_idempotency (parent_account_id, idempotency_key), INDEX recognition_tasks_status (status, expires_at), INDEX recognition_tasks_owner (parent_account_id, created_at)
   ) ENGINE=InnoDB`,
+  `ALTER TABLE recognition_tasks DROP INDEX recognition_tasks_idempotency`,
+  `ALTER TABLE recognition_tasks ADD COLUMN image_expires_at BIGINT NOT NULL DEFAULT 0, ADD COLUMN image_deleted_at BIGINT NULL, ADD INDEX recognition_tasks_image_retention (image_deleted_at, image_expires_at)`,
+  `UPDATE recognition_tasks SET image_expires_at = created_at + 86400000 WHERE image_expires_at = 0`,
+  `CREATE TABLE IF NOT EXISTS homework_upload_credentials (
+    upload_token CHAR(36) PRIMARY KEY,
+    parent_account_id CHAR(36) NOT NULL,
+    child_profile_id CHAR(36) NOT NULL,
+    image_key TEXT NOT NULL,
+    expires_at BIGINT NOT NULL,
+    used_at BIGINT NULL,
+    INDEX homework_upload_credentials_owner (parent_account_id, child_profile_id)
+  ) ENGINE=InnoDB`,
 ] as const;
 
 export async function migrateMysqlSchema(pool: Pool): Promise<void> {

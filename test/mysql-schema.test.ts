@@ -34,6 +34,6 @@ test("schema migration records each version and skips already applied versions",
   assert.ok(queries.length > firstRunStatements);
   assert.equal(
     queries.filter((query) => query.startsWith("INSERT INTO schema_migrations")).length,
-    17,
+    21,
   );
 });

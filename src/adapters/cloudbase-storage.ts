@@ -3,6 +3,7 @@ export function createCloudBaseStorageVerifier(options: {
   deleteFile?: (fileId: string) => Promise<void>;
 }) {
   return {
+    getTemporaryUrl: options.getTemporaryUrl,
     async verifyUploadedFile(input: {
       fileId: string;
       expectedImageKey: string;

@@ -13,6 +13,7 @@ Page({
     verdicts: VERDICTS,
     imagePath: "",
     recognizing: false,
+    taskId: "",
   },
 
   async onLoad() {
@@ -59,24 +60,41 @@ Page({
     try {
       console.log("[homework_recognition_started]", { transport: require("../../config").transport });
       const imagePath = await compressForContainer(this.data.imagePath);
-      const upload = await new Promise((resolve, reject) => wx.cloud.uploadFile({ cloudPath: `homework/${Date.now()}.jpg`, filePath: imagePath, success: resolve, fail: reject }));
-      const temporary = await new Promise((resolve, reject) => wx.cloud.getTempFileURL({ fileList: [upload.fileID], success: (value) => value.fileList?.[0]?.tempFileURL ? resolve(value.fileList[0].tempFileURL) : reject(new Error("无法获取图片临时地址")), fail: reject }));
-      console.log("[homework_recognition_image_ready]", { hasFileId: Boolean(upload.fileID), hasTemporaryUrl: Boolean(temporary) });
+      const credential = await api.request("POST", "/homework-upload-credential", { childProfileId: this.data.childId });
+      const upload = await new Promise((resolve, reject) => wx.cloud.uploadFile({ cloudPath: credential.imageKey, filePath: imagePath, success: resolve, fail: reject }));
+      console.log("[homework_recognition_image_ready]", { hasFileId: Boolean(upload.fileID) });
       const task = await api.request("POST", "/recognition-tasks", {
         childProfileId: this.data.childId,
         kind: "homework_page",
-        imageKey: upload.fileID,
-        imageUrl: temporary,
+        fileId: upload.fileID,
+        uploadToken: credential.uploadToken,
         idempotencyKey: `homework-${Date.now()}`,
       });
-      const recognition = await waitForRecognition(task.taskId);
-      const review = await api.request("POST", "/homework-reviews", { childProfileId: this.data.childId, recognition });
-      console.log("[homework_recognition_succeeded]", { questionCount: review.candidates ? review.candidates.length : 0 });
-      this.setData({ review });
+      this.setData({ taskId: task.taskId });
+      wx.setStorageSync("homeworkRecognitionTask", { taskId: task.taskId, childId: this.data.childId, expiresAt: Date.now() + 60_000 });
+      const recognition = await this.waitForRecognition(task.taskId);
+      await this.completeRecognition(recognition, this.data.childId);
     } catch (error) {
       console.error("[homework_recognition_failed]", { errorMessage: error && error.message ? String(error.message).slice(0, 300) : "" });
-      wx.showModal({ title: "作业识别失败", content: `${error.message || "请重试"}。也可以手动录入。`, confirmText: "手动录入", cancelText: "重试", success: (result) => { if (result.confirm) this.clearImage(); } });
+      wx.showModal({ title: "作业识别失败", content: `${error.message || "请重试"}。也可以手动录入。`, confirmText: "手动录入", cancelText: "重试", success: (result) => { if (result.confirm) this.clearImage(); else this.recognizeImage(); } });
     } finally { this.setData({ recognizing: false }); }
+  },
+  onShow() {
+    const saved = wx.getStorageSync("homeworkRecognitionTask");
+    if (saved && saved.expiresAt > Date.now() && !this.data.recognizing) this.waitForRecognition(saved.taskId).then((recognition) => this.completeRecognition(recognition, saved.childId)).catch(() => {});
+  },
+  onUnload() { this.stopPolling(); },
+  stopPolling() { this.polling = false; },
+  async waitForRecognition(taskId) {
+    this.stopPolling(); this.polling = true;
+    try { return await waitForRecognition(taskId, () => this.polling); }
+    finally { this.polling = false; }
+  },
+  async completeRecognition(recognition, childId) {
+    const review = await api.request("POST", "/homework-reviews", { childProfileId: childId, recognition });
+    if (wx.removeStorageSync) wx.removeStorageSync("homeworkRecognitionTask");
+    console.log("[homework_recognition_succeeded]", { questionCount: review.candidates ? review.candidates.length : 0 });
+    this.setData({ review });
   },
 
   async createReview() {
@@ -145,29 +163,24 @@ async function compressForContainer(src) {
     { quality: 12, compressedWidth: 400 },
     { quality: 8, compressedWidth: 320 },
   ];
-  let imageDataUrl = await readImageDataUrl(src);
+  let path = src;
   for (const attempt of attempts) {
-    if (imageDataUrl.length <= 70_000) return imageDataUrl;
-    const path = await compress(src, attempt.quality, attempt.compressedWidth);
-    imageDataUrl = await readImageDataUrl(path);
+    path = await compress(src, attempt.quality, attempt.compressedWidth);
+    if (path) return path;
   }
-  return imageDataUrl;
+  return src;
 }
 
 function compress(src, quality, compressedWidth) {
   return new Promise((resolve) => wx.compressImage({ src, quality, compressedWidth, success: (result) => resolve(result.tempFilePath), fail: () => resolve(src) }));
 }
 
-function readImageDataUrl(filePath) {
-  return new Promise((resolve, reject) => wx.getFileSystemManager().readFile({ filePath, encoding: "base64", success: (result) => resolve(`data:image/jpeg;base64,${result.data}`), fail: reject }));
-}
-
-async function waitForRecognition(taskId) {
+async function waitForRecognition(taskId, active = () => true) {
   const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
+  while (active() && Date.now() < deadline) {
     const task = await api.request("GET", `/recognition-tasks/${taskId}`);
     if (task.status === "succeeded") return task.result;
-    if (task.status === "failed") throw new Error(task.error === "recognition_busy" ? "识别服务繁忙，请重试" : "未识别到清晰的数学题，请重新拍摄或手动录入");
+    if (task.status === "failed") throw new Error(task.error === "recognition_busy" || task.error === "recognition_dispatch_failed" ? "识别服务繁忙，请重试" : "未识别到清晰的数学题，请重新拍摄或手动录入");
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   throw new Error("识别服务繁忙，请重试");
