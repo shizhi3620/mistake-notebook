@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
+import packageJson from "../../package.json" with { type: "json" };
 
 loadDotEnv();
 
@@ -27,6 +28,9 @@ import { processRecognitionTask } from "./recognition-worker.ts";
 import { createTencentScfInvoker } from "../adapters/tencent-scf-invoker.ts";
 
 const deepSeekApiKey = process.env.DEEPSEEK_API_KEY;
+const buildVersion = process.env.BUILD_VERSION ?? process.env.APP_VERSION ?? packageJson.version;
+const buildBranch = process.env.BUILD_BRANCH ?? process.env.GIT_BRANCH ?? "unknown";
+const buildCommit = process.env.BUILD_COMMIT ?? process.env.GIT_COMMIT ?? "unknown";
 const logEvent = (event: Record<string, unknown>) => console.log(JSON.stringify(event));
 const weChatAppId = requiredEnvironment("WECHAT_APP_ID");
 const weChatAppSecret = requiredEnvironment("WECHAT_APP_SECRET");
@@ -189,6 +193,7 @@ const server = createLearningLoopServer({
 });
 
 server.listen(port, () => {
+  logEvent({ event: "service_started", version: buildVersion, branch: buildBranch, commit: buildCommit, cloudHosting: process.env.CLOUD_HOSTING === "true" });
   console.log(
     `math-mistake-notebook server listening on http://127.0.0.1:${port}` +
       (deepSeekApiKey ? "" : " (DEEPSEEK_API_KEY not set: explanation and recognition disabled)"),

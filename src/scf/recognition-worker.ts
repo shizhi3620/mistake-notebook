@@ -9,10 +9,14 @@ import { processRecognitionTask } from "../server/recognition-worker.ts";
 export async function main(event: { taskId?: string; cleanup?: boolean } | string) {
   const request = typeof event === "string" ? JSON.parse(event) : event;
   const taskId = request.taskId;
+  console.log(JSON.stringify({ event: "recognition_worker_started", mode: request.cleanup ? "cleanup" : "task", hasTaskId: Boolean(taskId) }));
   const mysql = readMysqlConnectionConfig();
   const apiKey = process.env.DEEPSEEK_API_KEY;
   const env = process.env.CLOUDBASE_ENV;
-  if (!mysql || !apiKey || !env) throw new Error("Worker database, DeepSeek, and CloudBase environment configuration is required.");
+  if (!mysql || !apiKey || !env) {
+    console.error(JSON.stringify({ event: "recognition_worker_configuration_missing", hasMysql: Boolean(mysql), hasDeepSeekApiKey: Boolean(apiKey), hasCloudBaseEnv: Boolean(env) }));
+    throw new Error("Worker database, DeepSeek, and CloudBase environment configuration is required.");
+  }
   const pool = createMysqlPool(mysql);
   const storage = createCloudBaseNodeStorageVerifier({ env, region: process.env.CLOUDBASE_REGION ?? "ap-shanghai" });
   const taskStore = new MysqlRecognitionTaskStore(pool);
@@ -23,6 +27,7 @@ export async function main(event: { taskId?: string; cleanup?: boolean } | strin
   const homework = createOpenAiCompatibleHomeworkRecognitionClient({ baseUrl: process.env.LLM_BASE_URL ?? "https://api.deepseek.com", apiKey, model: process.env.HOMEWORK_RECOGNITION_MODEL ?? process.env.RECOGNITION_MODEL ?? "deepseek-v4-flash-vision-exp", timeoutMs: 55_000, maxRetries: 0, onEvent: (event) => console.log(JSON.stringify(event)) });
   try {
     if (request.cleanup) {
+      console.log(JSON.stringify({ event: "recognition_image_cleanup_started" }));
       const imageKeys = await taskStore.findExpiredImages(Date.now());
       for (const imageKey of imageKeys) {
         await storage.deleteUploadedFile(imageKey);
@@ -33,5 +38,11 @@ export async function main(event: { taskId?: string; cleanup?: boolean } | strin
     }
     if (!taskId) throw new Error("taskId is required.");
     return await processRecognitionTask({ taskId, taskStore, resolveImageUrl: storage.getTemporaryUrl, recognizeQuestion: question, recognizeHomework: homework, triggerRetry: retryInvoker, log: (event) => console.log(JSON.stringify(event)) });
+  } catch (error) {
+    console.error(JSON.stringify({ event: "recognition_worker_failed", name: error instanceof Error ? error.name : "Error", message: error instanceof Error ? error.message : String(error) }));
+    throw error;
   } finally { await pool.end(); }
 }
+
+// Standard Tencent SCF Node.js handler name; keep `main` for direct invocations.
+export const main_handler = main;
