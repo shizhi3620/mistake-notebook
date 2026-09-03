@@ -137,10 +137,11 @@ async function compressForContainer(src) {
     { quality: 22, compressedWidth: 640 },
     { quality: 16, compressedWidth: 512 },
     { quality: 12, compressedWidth: 400 },
+    { quality: 8, compressedWidth: 320 },
   ];
   let imageDataUrl = await readImageDataUrl(src);
   for (const attempt of attempts) {
-    if (imageDataUrl.length <= 90_000) return imageDataUrl;
+    if (imageDataUrl.length <= 70_000) return imageDataUrl;
     const path = await compress(src, attempt.quality, attempt.compressedWidth);
     imageDataUrl = await readImageDataUrl(path);
   }
