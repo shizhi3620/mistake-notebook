@@ -44,7 +44,7 @@ export function createOpenAiCompatibleRecognitionClient(
             content: [
               {
                 type: "image_url",
-                image_url: { url: imageDataUrl },
+                image_url: { url: imageDataUrl, detail: "low" },
               },
             ],
           },

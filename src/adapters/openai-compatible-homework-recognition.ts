@@ -16,7 +16,7 @@ export function createOpenAiCompatibleHomeworkRecognitionClient(options: OpenAiC
       response = await fetchImpl(`${baseUrl}/v1/chat/completions`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${options.apiKey}` },
-        body: JSON.stringify({ model: options.model, max_tokens: 3000, response_format: { type: "json_object" }, messages: [{ role: "system", content: PROMPT }, { role: "user", content: [{ type: "image_url", image_url: { url: imageDataUrl } }] }] }),
+        body: JSON.stringify({ model: options.model, max_tokens: 3000, response_format: { type: "json_object" }, messages: [{ role: "system", content: PROMPT }, { role: "user", content: [{ type: "image_url", image_url: { url: imageDataUrl, detail: "low" } }] }] }),
         signal: AbortSignal.timeout(options.timeoutMs ?? 14_000),
       });
     } catch (error) {
