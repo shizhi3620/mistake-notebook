@@ -100,20 +100,13 @@ Page({
         temporaryUrlLength: temporaryUrl ? temporaryUrl.length : 0,
         transport: config.transport,
       });
-      const photoPayload = {
-        uploadToken: credential.uploadToken,
-        fileId: upload.fileID,
-        imageKey: credential.imageKey,
-        ...(config.transport === "https" ? { imageDataUrl } : { imageUrl: temporaryUrl }),
-      };
+      const photoPayload = { childProfileId: overview.child.id, draftId: draft.id, kind: "single_question", imageKey: credential.imageKey, imageUrl: temporaryUrl, idempotencyKey: `${draft.id}-${Date.now()}` };
       console.log("[photo_recognition_submit]", {
-        hasFileId: Boolean(photoPayload.fileId),
-        hasUploadToken: Boolean(photoPayload.uploadToken),
-        hasImageDataUrl: Boolean(photoPayload.imageDataUrl),
         hasImageUrl: Boolean(photoPayload.imageUrl),
-        imageDataUrlLength: photoPayload.imageDataUrl ? photoPayload.imageDataUrl.length : 0,
       });
-      const recognized = await api.request("POST", `/drafts/${draft.id}/photo`, photoPayload);
+      const task = await api.request("POST", "/recognition-tasks", photoPayload);
+      const result = await waitForRecognition(task.taskId);
+      const recognized = await api.request("POST", `/drafts/${draft.id}/recognition`, { recognition: result });
       wx.setStorageSync("currentDraft", recognized);
       wx.navigateTo({ url: `/pages/confirm/confirm?draftId=${draft.id}` });
     } catch (error) {
@@ -144,6 +137,17 @@ function compressForRecognition(src) {
       fail: () => resolve(src),
     });
   });
+}
+
+async function waitForRecognition(taskId) {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const task = await api.request("GET", `/recognition-tasks/${taskId}`);
+    if (task.status === "succeeded") return task.result;
+    if (task.status === "failed") throw new Error(task.error === "recognition_busy" ? "识别服务繁忙，请重试" : "未识别到清晰的数学题，请重新拍摄或手动录入");
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error("识别服务繁忙，请重试");
 }
 
 function readImageDataUrl(filePath) {

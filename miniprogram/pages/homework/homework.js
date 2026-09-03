@@ -58,13 +58,18 @@ Page({
     this.setData({ recognizing: true });
     try {
       console.log("[homework_recognition_started]", { transport: require("../../config").transport });
-      const imageDataUrl = await compressForContainer(this.data.imagePath);
-      console.log("[homework_recognition_image_ready]", { imageDataUrlLength: imageDataUrl.length });
-      if (imageDataUrl.length > 95_000) throw new Error("图片过大，请裁剪作业区域后重试");
-      const review = await api.request("POST", "/homework-reviews", {
+      const upload = await new Promise((resolve, reject) => wx.cloud.uploadFile({ cloudPath: `homework/${Date.now()}.jpg`, filePath: imagePath, success: resolve, fail: reject }));
+      const temporary = await new Promise((resolve, reject) => wx.cloud.getTempFileURL({ fileList: [upload.fileID], success: (value) => value.fileList?.[0]?.tempFileURL ? resolve(value.fileList[0].tempFileURL) : reject(new Error("无法获取图片临时地址")), fail: reject }));
+      console.log("[homework_recognition_image_ready]", { hasFileId: Boolean(upload.fileID), hasTemporaryUrl: Boolean(temporary) });
+      const task = await api.request("POST", "/recognition-tasks", {
         childProfileId: this.data.childId,
-        imageDataUrl,
+        kind: "homework_page",
+        imageKey: upload.fileID,
+        imageUrl: temporary,
+        idempotencyKey: `homework-${Date.now()}`,
       });
+      const recognition = await waitForRecognition(task.taskId);
+      const review = await api.request("POST", "/homework-reviews", { childProfileId: this.data.childId, recognition });
       console.log("[homework_recognition_succeeded]", { questionCount: review.candidates ? review.candidates.length : 0 });
       this.setData({ review });
     } catch (error) {
@@ -154,4 +159,15 @@ function compress(src, quality, compressedWidth) {
 
 function readImageDataUrl(filePath) {
   return new Promise((resolve, reject) => wx.getFileSystemManager().readFile({ filePath, encoding: "base64", success: (result) => resolve(`data:image/jpeg;base64,${result.data}`), fail: reject }));
+}
+
+async function waitForRecognition(taskId) {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const task = await api.request("GET", `/recognition-tasks/${taskId}`);
+    if (task.status === "succeeded") return task.result;
+    if (task.status === "failed") throw new Error(task.error === "recognition_busy" ? "识别服务繁忙，请重试" : "未识别到清晰的数学题，请重新拍摄或手动录入");
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error("识别服务繁忙，请重试");
 }

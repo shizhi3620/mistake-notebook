@@ -181,6 +181,10 @@ const schemaStatements = [
     INDEX feedback_priority (parent_account_id, type, created_at),
     CONSTRAINT feedback_parent_account FOREIGN KEY (parent_account_id) REFERENCES parent_accounts(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS recognition_tasks (
+    id CHAR(36) PRIMARY KEY, parent_account_id CHAR(36) NOT NULL, child_profile_id CHAR(36) NOT NULL, draft_id CHAR(36) NULL, kind VARCHAR(32) NOT NULL, image_key TEXT NOT NULL, image_url TEXT NULL, status VARCHAR(32) NOT NULL, attempts SMALLINT NOT NULL DEFAULT 0, result_json JSON NULL, error_code VARCHAR(64) NULL, idempotency_key VARCHAR(128) NOT NULL, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, expires_at BIGINT NOT NULL,
+    UNIQUE KEY recognition_tasks_idempotency (parent_account_id, idempotency_key), INDEX recognition_tasks_status (status, expires_at), INDEX recognition_tasks_owner (parent_account_id, created_at)
+  ) ENGINE=InnoDB`,
 ] as const;
 
 export async function migrateMysqlSchema(pool: Pool): Promise<void> {

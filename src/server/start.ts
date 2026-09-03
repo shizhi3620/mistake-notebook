@@ -22,6 +22,8 @@ import { LearningLoop } from "../learning-loop.ts";
 import { SqliteLearningLoopStore } from "../sqlite-learning-loop-store.ts";
 import { createLearningLoopServer } from "./http-server.ts";
 import { MysqlIdempotencyStore } from "./idempotency-store.ts";
+import { MysqlRecognitionTaskStore, InMemoryRecognitionTaskStore } from "../adapters/recognition-task-store.ts";
+import { processRecognitionTask } from "./recognition-worker.ts";
 
 const deepSeekApiKey = process.env.DEEPSEEK_API_KEY;
 const logEvent = (event: Record<string, unknown>) => console.log(JSON.stringify(event));
@@ -142,6 +144,7 @@ const learningLoop = new LearningLoop(learningStore, {
   imageDeleter: photoStorage?.deleteUploadedFile,
   reminderSender,
 });
+const recognitionTaskStore = mysqlPool ? new MysqlRecognitionTaskStore(mysqlPool) : new InMemoryRecognitionTaskStore();
 
 const server = createLearningLoopServer({
   learningLoop,
@@ -150,6 +153,12 @@ const server = createLearningLoopServer({
   photoStorage,
   recognitionClient,
   homeworkRecognitionClient,
+  recognitionTaskStore,
+  triggerRecognitionTask: async (taskId) => {
+    if (!recognitionClient || !homeworkRecognitionClient) throw new Error("recognition_unavailable");
+    // In production this same handler is invoked by SCF; local development runs it in-process.
+    await processRecognitionTask({ taskId, taskStore: recognitionTaskStore, recognizeQuestion: recognitionClient, recognizeHomework: homeworkRecognitionClient });
+  },
   reminderSchedulerSecret,
   feedbackOperatorSecret: process.env.FEEDBACK_OPERATOR_SECRET?.trim() || undefined,
   feedbackOperatorId: process.env.FEEDBACK_OPERATOR_ID?.trim() || "feedback-operator",

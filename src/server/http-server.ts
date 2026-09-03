@@ -19,6 +19,7 @@ import {
   type IdempotencyStore,
 } from "./idempotency-store.ts";
 import { assertCloudBaseFileOwnership } from "../adapters/cloudbase-storage.ts";
+import { InMemoryRecognitionTaskStore, type RecognitionTask, type RecognitionTaskStore } from "../adapters/recognition-task-store.ts";
 
 export type LearningLoopServerDependencies = {
   learningLoop: LearningLoop;
@@ -43,6 +44,8 @@ export type LearningLoopServerDependencies = {
   feedbackOperatorSecret?: string;
   feedbackOperatorId?: string;
   idempotencyStore?: IdempotencyStore;
+  recognitionTaskStore?: RecognitionTaskStore;
+  triggerRecognitionTask?: (taskId: string) => Promise<void>;
 };
 
 export type HttpRequestLogEvent = {
@@ -94,6 +97,7 @@ export function createLearningLoopServer(
   const aiRateLimiter = new AiRateLimiter(maxAiRequestsPerMinute);
   const aiUsageLedger = new AiUsageLedger(dependencies.maxAiRequestsPerMonth ?? 500);
   const idempotencyStore = dependencies.idempotencyStore ?? new InMemoryIdempotencyStore();
+  const recognitionTaskStore = dependencies.recognitionTaskStore ?? new InMemoryRecognitionTaskStore();
 
   return createServer((request, response) => {
     const requestId = randomUUID();
@@ -329,6 +333,27 @@ export function createLearningLoopServer(
           body?.source,
         ),
       );
+    }
+    if (method === "POST" && route === "/recognition-tasks") {
+      const childProfileId = String(body?.childProfileId ?? "");
+      if (!(await learningLoop.listChildProfilesAsync(auth)).some((child) => child.id === childProfileId)) throw new Error("Child profile was not found.");
+      const kind = body?.kind === "homework_page" ? "homework_page" : body?.kind === "single_question" ? "single_question" : null;
+      const imageKey = String(body?.imageKey ?? "");
+      const idempotencyKey = String(request.headers["idempotency-key"] ?? body?.idempotencyKey ?? "");
+      if (!kind || !imageKey || !idempotencyKey) throw new Error("Recognition task kind, image key and idempotency key are required.");
+      const task = await recognitionTaskStore.create({ parentAccountId: auth, childProfileId, draftId: typeof body?.draftId === "string" ? body.draftId : null, kind, imageKey, imageUrl: typeof body?.imageUrl === "string" ? body.imageUrl : null, idempotencyKey, expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 });
+      void dependencies.triggerRecognitionTask?.(task.id).catch(() => log({ event: "recognition_task_trigger_failed", requestId: String(response.getHeader("x-request-id") ?? ""), taskId: task.id }));
+      return send(response, 202, taskView(task));
+    }
+    const draftRecognitionMatch = match(route, "/drafts/:id/recognition");
+    if (method === "POST" && draftRecognitionMatch) {
+      return send(response, 200, await learningLoop.recordQuestionRecognitionAsync(auth, draftRecognitionMatch.id, body?.recognition));
+    }
+    const recognitionTaskMatch = match(route, "/recognition-tasks/:id");
+    if (method === "GET" && recognitionTaskMatch) {
+      const task = await recognitionTaskStore.find(auth, recognitionTaskMatch.id);
+      if (!task) throw new Error("Recognition task was not found.");
+      return send(response, 200, taskView(task));
     }
     if (method === "POST" && route === "/homework-reviews") {
       if (body?.imageDataUrl && homeworkRecognitionClient) {
@@ -825,4 +850,8 @@ function sanitizeErrorMessage(message: string): string {
     .replace(/https:\/\/[^\s]+/gi, "https://<redacted>")
     .replace(/Bearer\s+[^\s]+/gi, "Bearer <redacted>")
     .slice(0, 500);
+}
+
+function taskView(task: RecognitionTask) {
+  return { taskId: task.id, kind: task.kind, status: task.status, result: task.status === "succeeded" ? task.result : undefined, error: task.status === "failed" ? task.errorCode : undefined, expiresAt: task.expiresAt };
 }

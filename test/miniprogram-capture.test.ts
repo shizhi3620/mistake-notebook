@@ -15,7 +15,9 @@ test("capture page compresses, uploads, and submits the selected image", async (
       if (path.endsWith("/photo-credential")) {
         return { uploadToken: "upload-1", imageKey: "questions/draft-1/photo-1" };
       }
-      if (path.endsWith("/photo")) return { recognition: { stem: "1 + 1" } };
+      if (path === "/recognition-tasks") return { taskId: "task-1", status: "pending" };
+      if (path === "/recognition-tasks/task-1") return { status: "succeeded", result: { stem: "1 + 1", formulas: [], confidence: 1, region: null } };
+      if (path.endsWith("/recognition")) return { recognition: { stem: "1 + 1" } };
       throw new Error(`Unexpected API path: ${path}`);
     },
   };
