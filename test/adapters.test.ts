@@ -283,36 +283,6 @@ test("the WeChat identity resolver exchanges a temporary code without exposing s
   });
   await assert.rejects(unavailable("retry-code"), /could not be verified/i);
 });
-test("CloudBase storage deletion only accepts cloud file IDs", async () => {
-  let deleted = "";
-  const { createCloudBaseStorageVerifier } = await import("../src/adapters/cloudbase-storage.ts");
-  const storage = createCloudBaseStorageVerifier({ getTemporaryUrl: async () => "https://example.test/image", deleteFile: async (fileId) => { deleted = fileId; } });
-  await storage.deleteUploadedFile("cloud://env/path/image.jpg");
-  assert.equal(deleted, "cloud://env/path/image.jpg");
-  await assert.rejects(() => storage.deleteUploadedFile("https://example.test/image"), /invalid CloudBase file ID/);
-});
-
-test("CloudBase upload verification binds a file ID to its upload credential path", async () => {
-  const { createCloudBaseStorageVerifier } = await import("../src/adapters/cloudbase-storage.ts");
-  const storage = createCloudBaseStorageVerifier({
-    getTemporaryUrl: async () => "https://example.test/image",
-  });
-  assert.deepEqual(
-    await storage.verifyUploadedFile({
-      fileId: "cloud://prod-env/questions/draft-1/file-1",
-      expectedImageKey: "questions/draft-1/file-1",
-    }),
-    { imageUrl: "https://example.test/image" },
-  );
-  await assert.rejects(
-    storage.verifyUploadedFile({
-      fileId: "cloud://prod-env/questions/other/file-2",
-      expectedImageKey: "questions/draft-1/file-1",
-    }),
-    /does not belong/i,
-  );
-});
-
 test("WeChat reminder sender caches tokens and sends only privacy-safe template data", async () => {
   const { createWeChatSubscriptionReminderSender } = await import("../src/adapters/wechat-subscription-reminder.ts");
   const requests: Array<{ url: string; body?: any }> = [];

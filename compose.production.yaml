@@ -1,0 +1,7 @@
+services:
+  api:
+    image: ${API_IMAGE:?set API_IMAGE to a TCR image digest or version tag}
+    env_file: /opt/math-mistake-notebook/.env.production
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped

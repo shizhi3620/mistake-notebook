@@ -46,15 +46,19 @@ test("idempotency store replays completed responses and releases failures", asyn
 });
 
 test("a guardian can create and query an asynchronous recognition task but another guardian cannot read it", async () => {
+  const verifiedObjects: string[] = [];
   await withServer(async (api) => {
     const first = await api.call("POST", "/session", { body: { code: "task-owner" } });
     const firstToken = first.body.session.token as string;
     await api.call("POST", "/guardianship/confirm", { token: firstToken });
     const child = await api.call("POST", "/children", { token: firstToken, body: { nickname: "小明", grade: 3 } });
     const credential = await api.call("POST", "/homework-upload-credential", { token: firstToken, body: { childProfileId: child.body.id } });
-    const task = await api.call("POST", "/recognition-tasks", { token: firstToken, idempotencyKey: "task-key", body: { childProfileId: child.body.id, kind: "homework_page", uploadToken: credential.body.uploadToken, fileId: `cloud://test/${credential.body.imageKey}` } });
+    const rejected = await api.call("POST", "/recognition-tasks", { token: firstToken, idempotencyKey: "task-key-rejected", body: { childProfileId: child.body.id, kind: "homework_page", uploadToken: credential.body.uploadToken, objectKey: "homework/other-family/not-authorized.jpg" } });
+    assert.equal(rejected.status, 400);
+    const task = await api.call("POST", "/recognition-tasks", { token: firstToken, idempotencyKey: "task-key", body: { childProfileId: child.body.id, kind: "homework_page", uploadToken: credential.body.uploadToken, objectKey: credential.body.objectKey } });
     assert.equal(task.status, 202);
     assert.equal(task.body.status, "pending");
+    assert.deepEqual(verifiedObjects, [credential.body.objectKey]);
     const own = await api.call("GET", `/recognition-tasks/${task.body.taskId}`, { token: firstToken });
     assert.equal(own.status, 200);
     const second = await api.call("POST", "/session", { body: { code: "task-other" } });
@@ -62,6 +66,13 @@ test("a guardian can create and query an asynchronous recognition task but anoth
     await api.call("POST", "/guardianship/confirm", { token: otherToken });
     const forbidden = await api.call("GET", `/recognition-tasks/${task.body.taskId}`, { token: otherToken });
     assert.equal(forbidden.status, 400);
+  }, {
+    photoStorage: {
+      async createUploadUrl(input) { return { uploadUrl: `https://cos.example.test/${input.objectKey}`, method: "PUT", headers: { "content-type": input.contentType } }; },
+      async assertObjectExists(objectKey) { verifiedObjects.push(objectKey); },
+      async getTemporaryUrl(objectKey) { return `https://cos.example.test/${objectKey}`; },
+      async deleteUploadedFile() {},
+    },
   });
 });
 
@@ -450,16 +461,13 @@ test("health reports storage unavailability when the database check fails", asyn
   }
 });
 
-test("the HTTP API accepts a CloudBase file ID only after an upload credential", async () => {
+test("the HTTP API issues a scoped COS upload URL without exposing credentials", async () => {
   const learningLoop = new LearningLoop();
   const server = createLearningLoopServer({
     learningLoop,
     photoStorage: {
-      verifyUploadedFile: async ({ fileId, expectedImageKey }) => {
-        assert.match(expectedImageKey, /^questions\//);
-        assert.equal(fileId, `cloud://prod/${expectedImageKey}`);
-        return { imageUrl: "https://storage.example/photo.jpg" };
-      },
+      createUploadUrl: async ({ objectKey, contentType }) => ({ uploadUrl: `https://storage.example/${objectKey}`, method: "PUT", headers: { "content-type": contentType } }),
+      assertObjectExists: async () => {},
       getTemporaryUrl: async () => "https://storage.example/photo.jpg",
       deleteUploadedFile: async () => {},
     },
@@ -498,14 +506,11 @@ test("the HTTP API accepts a CloudBase file ID only after an upload credential",
     const credential = await call(`/drafts/${draft.body.id}/photo-credential`, {}, token);
     assert.equal(credential.body.parentAccountId, undefined);
     assert.equal(credential.body.usedAt, undefined);
-    const recognized = await call(`/drafts/${draft.body.id}/photo`, {
-      uploadToken: credential.body.uploadToken,
-      fileId: `cloud://prod/${credential.body.imageKey}`,
-      imageDataUrl: "data:image/jpeg;base64,QUJD",
-    }, token);
-
-    assert.equal(recognized.status, 200, JSON.stringify(recognized.body));
-    assert.equal(recognized.body.recognition.stem, "1 + 1 = ?");
+    assert.match(credential.body.objectKey, /^questions\//);
+    assert.match(credential.body.uploadUrl, new RegExp(credential.body.objectKey));
+    assert.deepEqual(credential.body.headers, { "content-type": "image/jpeg" });
+    assert.equal(credential.body.parentAccountId, undefined);
+    assert.equal(credential.body.usedAt, undefined);
   } finally {
     server.close();
   }

@@ -1,5 +1,6 @@
 const api = require("../../services/api");
 const config = require("../../config");
+const { uploadToCos } = require("../../services/cos-upload");
 
 Page({
   data: {
@@ -73,19 +74,12 @@ Page({
         `/drafts/${draft.id}/photo-credential`,
       );
       const recognitionImagePath = await compressForRecognition(this.data.imagePath);
-      const upload = await new Promise((resolve, reject) => {
-        wx.cloud.uploadFile({
-          cloudPath: credential.imageKey,
-          filePath: recognitionImagePath,
-          success: resolve,
-          fail: reject,
-        });
-      });
+      const upload = await uploadToCos(credential, recognitionImagePath);
       console.log("[photo_upload_ready]", {
-        hasFileId: Boolean(upload.fileID),
+        hasObjectKey: Boolean(upload.objectKey),
         transport: config.transport,
       });
-      const photoPayload = { childProfileId: overview.child.id, draftId: draft.id, kind: "single_question", fileId: upload.fileID, uploadToken: credential.uploadToken, idempotencyKey: `${draft.id}-${Date.now()}` };
+      const photoPayload = { childProfileId: overview.child.id, draftId: draft.id, kind: "single_question", objectKey: upload.objectKey, uploadToken: credential.uploadToken, idempotencyKey: `${draft.id}-${Date.now()}` };
       const task = await api.request("POST", "/recognition-tasks", photoPayload);
       this.setData({ taskId: task.taskId });
       wx.setStorageSync("captureRecognitionTask", { taskId: task.taskId, draftId: draft.id, expiresAt: Date.now() + 60_000 });

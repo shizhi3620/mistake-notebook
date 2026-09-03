@@ -15,3 +15,4 @@
 | PRD-001 | [学生学习助手](./PRD-001-student-learning-assistant-v0.1.0.md) | v0.1.0 | 草案 | 作业讲解、错题本、班级通知与学习数据对比的 MVP 需求 |
 | PRD-002 | [家长作业讲解与错题本](./PRD-002-parent-homework-mistakes-v1.1.0.md) | v1.1.0 | 可开发 | 微信小程序首发；聚焦家长辅助孩子的拍题讲解、错题沉淀和复习闭环；替代 PRD-001 中的核心功能范围 |
 | PRD-003 | [异步图像识别任务](./PRD-003-asynchronous-vision-recognition-v1.0.0.md) | v1.0.0 | 可开发 | 为单题讲解与作业批改提供基于腾讯云函数、对象存储、MySQL 和 DeepSeek 的异步识别闭环 |
+| PRD-004 | [腾讯云生产后端迁移](./PRD-004-tencent-cloud-backend-migration-v1.0.0.md) | v1.0.0 | 可开发 | 以 CVM、COS、私网 MySQL、SCF、NAT、TCR 和 CLS 替代已销毁的微信云托管环境 |

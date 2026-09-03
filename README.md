@@ -1,46 +1,35 @@
-# 数学错题本（math-mistake-notebook）
+# 数学错题本
 
-面向家长的微信小程序：拍数学错题 → 年级适配的引导式讲解 → 错题本 → 艾宾浩斯复习闭环 → 周报与薄弱点。规格见 `../.scratch/wechat-math-mistake-notebook/`。
+微信小程序后端采用普通腾讯云部署：小程序 HTTPS API、CVM 上 Docker Node.js、私网 MySQL、私有 COS 与异步 SCF 图像识别 Worker。产品规格见 `requirements/`，生产迁移基线为 `PRD-004`。
 
-## 目录结构
-
-- `src/learning-loop.ts` — 领域层（`LearningLoop`），覆盖工单 01–09 的全部产品规则；存储经 `LearningLoopStore` 接口注入。
-- `src/sqlite-learning-loop-store.ts` — SQLite 存储实现（`better-sqlite3`）。
-- `src/adapters/openai-compatible-explanation.ts` — 真实讲解适配器（OpenAI 兼容端点；默认 DeepSeek `deepseek-chat`）。
-- `src/adapters/openai-compatible-recognition.ts` — 真实图片识别适配器（视觉模型；默认 `deepseek-v4-flash-vision-exp`）。
-- `src/server/http-server.ts` — 会话鉴权的 JSON API（`createLearningLoopServer`）。
-- `src/server/start.ts` — 生产入口：SQLite + DeepSeek 适配器 + HTTP 服务。
-- `miniprogram/` — 微信小程序客户端（首页/拍题/确认/讲解/复习/错题本/周报/我的）。
-- `scripts/try-explanation.ts`、`scripts/try-recognition.ts` — 适配器实连调试脚本。
-
-## 运行
+## 本地运行
 
 ```bash
 npm install
-export DEEPSEEK_API_KEY="sk-..."   # 讲解与识别（可选，不设置则禁用）
-npm start                          # http://127.0.0.1:3000
+cp .env.example .env
+npm start
 ```
 
-环境变量：`WECHAT_APP_ID`、`WECHAT_APP_SECRET`（启动服务必需），以及 `PORT`（默认 3000）、`DATABASE_PATH`、`APP_VERSION`（首版为 `0.1.0`）、`EXPLANATION_VERSION`（首版为 `explanation-v1`）、`EXPLANATION_REQUEST_VERSION`（首版为 `explanation-request-v1`）、`LLM_BASE_URL`、`EXPLANATION_MODEL`、`RECOGNITION_MODEL`。云托管照片识别还需配置 `CLOUDBASE_ENV=prod-d8giqy4sjc5925f68` 和 `CLOUDBASE_REGION=ap-shanghai`。异步识别生产投递还需 `RECOGNITION_WORKER_FUNCTION_NAME`、`SCF_REGION` 及仅允许调用该函数的 CAM 凭据；详见 `docs/launch-readiness/04-asynchronous-recognition-worker.md`。`DEEPSEEK_API_KEY` 仍可选；未设置时题目识别与讲解不可用。
+本地仅需配置微信登录与 DeepSeek；若验证 COS 异步识别，还需配置 `.env.example` 中的 MySQL、COS、SCF 环境变量。密钥不得提交到 Git。
 
-小程序端：用微信开发者工具打开 `miniprogram/`，在本地 `project.private.config.json` 填入已获授权的小程序 AppID。为开发、体验和正式环境配置已登记的 HTTPS API 域名后，执行：
+## 小程序配置
+
+小程序仅使用 HTTPS API。运行以下命令生成被忽略的 `miniprogram/config.private.js`：
 
 ```bash
-MINIPROGRAM_DEVELOP_API_BASE=https://dev-api.example.com/api \\
-MINIPROGRAM_TRIAL_API_BASE=https://trial-api.example.com/api \\
-MINIPROGRAM_RELEASE_API_BASE=https://api.example.com/api \\
+MINIPROGRAM_DEVELOP_API_BASE=https://api.example.com/api \
+MINIPROGRAM_TRIAL_API_BASE=https://api.example.com/api \
+MINIPROGRAM_RELEASE_API_BASE=https://api.example.com/api \
 npm run configure:miniprogram
 ```
 
-该命令生成 Git 忽略的 `miniprogram/config.private.js`；小程序会按环境读取对应域名并初始化 CloudBase 环境 `prod-d8giqy4sjc5925f68`，且已启用微信合法域名校验。真实 AppID、AppSecret、生产地址和本地调试地址均不得提交到仓库。真机登录验收步骤见 `docs/launch-readiness/01-wechat-login-smoke.md`。
+在小程序后台把备案并启用 TLS 的 API 域名配置为合法 request 域名；COS 不需要配置为小程序业务域名，因为上传使用 API 签发的短期签名 URL。
 
-## 测试
+## 验证与发布
 
 ```bash
-npm run check   # tsc --noEmit
-npm test        # 53 个测试：领域层、适配器（注入 fetch）、HTTP 全路径
+npm run preflight
+npm run build:worker
 ```
 
-## 受控内测部署
-
-`compose.yaml` 仅用于本地开发。受控内测部署目标是微信云托管，学习数据迁移至腾讯云 MySQL，照片使用 CloudBase 云存储；健康检查路径为 `/healthz`。运行、备份恢复和回滚步骤见 `docs/launch-readiness/02-operations-runbook.md`，平台决策依据见 `docs/research/wechat-cloudbase-launch.md`。
+`dist/recognition-worker/index.js` 是 SCF Node.js 22 入口，处理函数配置为 `index.main_handler`。CVM、COS、SCF、MySQL 与域名的完整部署顺序见 `docs/launch-readiness/05-tencent-cloud-production-deployment.md`。

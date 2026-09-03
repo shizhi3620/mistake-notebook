@@ -15,10 +15,7 @@ const reminderTemplateIdByEnvironment = Object.fromEntries(
   environments.map((environment) => {
     const key = `MINIPROGRAM_${environment.toUpperCase()}_REMINDER_TEMPLATE_ID`;
     const value = process.env[key]?.trim();
-    if (!value) {
-      throw new Error(`${key} is required.`);
-    }
-    return [environment, value];
+    return [environment, value ?? ""];
   }),
 );
 

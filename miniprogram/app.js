@@ -1,5 +1,4 @@
 const api = require("./services/api");
-const config = require("./config");
 
 App({
   globalData: {
@@ -7,10 +6,6 @@ App({
   },
 
   onLaunch() {
-    wx.cloud.init({
-      env: config.cloudEnv,
-      traceUser: true,
-    });
     api
       .login()
       .then((login) => {

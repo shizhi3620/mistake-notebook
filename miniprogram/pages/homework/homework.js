@@ -1,4 +1,5 @@
 const api = require("../../services/api");
+const { uploadToCos } = require("../../services/cos-upload");
 
 const VERDICTS = ["正确", "错误", "待确认"];
 const VERDICT_VALUES = ["correct", "incorrect", "uncertain"];
@@ -61,12 +62,12 @@ Page({
       console.log("[homework_recognition_started]", { transport: require("../../config").transport });
       const imagePath = await compressForContainer(this.data.imagePath);
       const credential = await api.request("POST", "/homework-upload-credential", { childProfileId: this.data.childId });
-      const upload = await new Promise((resolve, reject) => wx.cloud.uploadFile({ cloudPath: credential.imageKey, filePath: imagePath, success: resolve, fail: reject }));
-      console.log("[homework_recognition_image_ready]", { hasFileId: Boolean(upload.fileID) });
+      const upload = await uploadToCos(credential, imagePath);
+      console.log("[homework_recognition_image_ready]", { hasObjectKey: Boolean(upload.objectKey) });
       const task = await api.request("POST", "/recognition-tasks", {
         childProfileId: this.data.childId,
         kind: "homework_page",
-        fileId: upload.fileID,
+        objectKey: upload.objectKey,
         uploadToken: credential.uploadToken,
         idempotencyKey: `homework-${Date.now()}`,
       });

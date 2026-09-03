@@ -9,7 +9,7 @@ import { createOpenAiCompatibleRecognitionClient } from "../adapters/openai-comp
 import { createOpenAiCompatibleHomeworkRecognitionClient } from "../adapters/openai-compatible-homework-recognition.ts";
 import { createWeChatIdentityResolver } from "../adapters/wechat-login.ts";
 import { createWeChatSubscriptionReminderSender } from "../adapters/wechat-subscription-reminder.ts";
-import { createCloudBaseNodeStorageVerifier } from "../adapters/cloudbase-storage.ts";
+import { createTencentCosPhotoStorage } from "../adapters/tencent-cos-storage.ts";
 import {
   createMysqlPool,
   closeMysqlPool,
@@ -41,13 +41,10 @@ const port = Number(process.env.PORT ?? 3000);
 const databasePath =
   process.env.DATABASE_PATH ?? new URL("../../data/learning.db", import.meta.url).pathname;
 
-if (process.env.CLOUD_HOSTING === "true" && !mysqlConfig) {
+if (process.env.PRODUCTION === "true" && !mysqlConfig) {
   throw new Error(
-    "MYSQL_HOST, MYSQL_DATABASE, MYSQL_USER, and MYSQL_PASSWORD are required in Cloud Hosting.",
+    "MYSQL_HOST, MYSQL_DATABASE, MYSQL_USER, and MYSQL_PASSWORD are required in production.",
   );
-}
-if (process.env.CLOUD_HOSTING === "true") {
-  requiredEnvironment("CLOUDBASE_ENV");
 }
 
 if (mysqlConfig) {
@@ -59,7 +56,7 @@ if (mysqlConfig) {
       if (
         !shouldRetryMysqlWithoutTls(
           error,
-          process.env.CLOUD_HOSTING === "true",
+          process.env.PRODUCTION === "true",
           mysqlConfig.ssl,
         )
       ) {
@@ -67,7 +64,7 @@ if (mysqlConfig) {
       }
       await closeMysqlPool(configuredMysqlPool);
       console.warn(
-        "[mysql_tls_unavailable] Server does not support TLS; retrying over the Cloud Hosting private network.",
+        "[mysql_tls_unavailable] Server does not support TLS; retrying without TLS.",
       );
       configuredMysqlPool = createMysqlPool({ ...mysqlConfig, ssl: false });
       await verifyMysqlPool(configuredMysqlPool);
@@ -102,9 +99,7 @@ const recognitionClient = deepSeekApiKey
       baseUrl: process.env.LLM_BASE_URL ?? "https://api.deepseek.com",
       apiKey: deepSeekApiKey,
       model: process.env.RECOGNITION_MODEL ?? "deepseek-v4-flash-vision-exp",
-      // wx.cloud.callContainer has a 15-second client limit. Leave room for
-      // Cloud Hosting routing and the response so the client receives a retryable error.
-      timeoutMs: 14_000,
+      timeoutMs: 55_000,
       maxRetries: 0,
       onEvent: logEvent,
     })
@@ -114,7 +109,7 @@ const homeworkRecognitionClient = deepSeekApiKey
       baseUrl: process.env.LLM_BASE_URL ?? "https://api.deepseek.com",
       apiKey: deepSeekApiKey,
       model: process.env.HOMEWORK_RECOGNITION_MODEL ?? process.env.RECOGNITION_MODEL ?? "deepseek-v4-flash-vision-exp",
-      timeoutMs: 11_000,
+      timeoutMs: 55_000,
       maxRetries: 0,
       onEvent: logEvent,
     })
@@ -124,10 +119,12 @@ const learningStore = mysqlPool
   ? new MysqlLearningLoopStore(mysqlPool)
   : new SqliteLearningLoopStore(databasePath);
 
-const photoStorage = process.env.CLOUDBASE_ENV
-  ? createCloudBaseNodeStorageVerifier({
-      env: process.env.CLOUDBASE_ENV,
-      region: process.env.CLOUDBASE_REGION ?? "ap-shanghai",
+const photoStorage = process.env.COS_SECRET_ID && process.env.COS_SECRET_KEY && process.env.COS_BUCKET && process.env.COS_REGION
+  ? createTencentCosPhotoStorage({
+      secretId: process.env.COS_SECRET_ID,
+      secretKey: process.env.COS_SECRET_KEY,
+      bucket: process.env.COS_BUCKET,
+      region: process.env.COS_REGION,
     })
   : undefined;
 const reminderTemplateId = process.env.WECHAT_REMINDER_TEMPLATE_ID?.trim();
@@ -150,7 +147,7 @@ const learningLoop = new LearningLoop(learningStore, {
   reminderSender,
 });
 const recognitionTaskStore = mysqlPool ? new MysqlRecognitionTaskStore(mysqlPool) : new InMemoryRecognitionTaskStore();
-const scfInvoker = process.env.CLOUD_HOSTING === "true"
+const scfInvoker = process.env.RECOGNITION_WORKER_FUNCTION_NAME
   ? createTencentScfInvoker({
       secretId: requiredEnvironment("TENCENTCLOUD_SECRETID"),
       secretKey: requiredEnvironment("TENCENTCLOUD_SECRETKEY"),
@@ -171,7 +168,7 @@ const server = createLearningLoopServer({
     if (!recognitionClient || !homeworkRecognitionClient) throw new Error("recognition_unavailable");
     if (scfInvoker) return scfInvoker(taskId);
     if (!photoStorage) throw new Error("recognition storage is not configured");
-    // Local development intentionally runs synchronously; Cloud Hosting never does.
+    // Local development intentionally runs synchronously; production invokes SCF.
     await processRecognitionTask({ taskId, taskStore: recognitionTaskStore, resolveImageUrl: photoStorage.getTemporaryUrl, recognizeQuestion: recognitionClient, recognizeHomework: homeworkRecognitionClient, log: logEvent });
   },
   recognitionWorkerSecret: process.env.RECOGNITION_WORKER_SECRET?.trim() || undefined,
@@ -194,7 +191,7 @@ const server = createLearningLoopServer({
 });
 
 server.listen(port, () => {
-  logEvent({ event: "service_started", version: buildVersion, branch: buildBranch, commit: buildCommit, cloudHosting: process.env.CLOUD_HOSTING === "true" });
+  logEvent({ event: "service_started", version: buildVersion, branch: buildBranch, commit: buildCommit, deployment: process.env.PRODUCTION === "true" ? "tencent-cloud" : "local" });
   console.log(
     `math-mistake-notebook server listening on http://127.0.0.1:${port}` +
       (deepSeekApiKey ? "" : " (DEEPSEEK_API_KEY not set: explanation and recognition disabled)"),

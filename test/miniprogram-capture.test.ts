@@ -13,7 +13,7 @@ test("capture page compresses, uploads, and submits the selected image", async (
       if (path === "/home") return { stage: "ready", child: { id: "child-1" } };
       if (path === "/drafts") return { id: "draft-1" };
       if (path.endsWith("/photo-credential")) {
-        return { uploadToken: "upload-1", imageKey: "questions/draft-1/photo-1" };
+        return { uploadToken: "upload-1", objectKey: "questions/draft-1/photo-1", method: "PUT", uploadUrl: "https://cos.example/photo", headers: { "content-type": "image/jpeg" } };
       }
       if (path === "/recognition-tasks") return { taskId: "task-1", status: "pending" };
       if (path === "/recognition-tasks/task-1") return { status: "succeeded", result: { stem: "1 + 1", formulas: [], confidence: 1, region: null } };
@@ -30,15 +30,7 @@ test("capture page compresses, uploads, and submits the selected image", async (
     getFileSystemManager: () => ({
       readFile: ({ success }: any) => success({ data: "QUJD" }),
     }),
-    cloud: {
-      uploadFile: ({ success }: any) => {
-        uploaded = true;
-        success({ fileID: "cloud://env/questions/draft-1/photo-1" });
-      },
-      getTempFileURL: ({ success }: any) => {
-        success({ fileList: [{ status: 0, tempFileURL: "https://storage.example/photo.jpg" }] });
-      },
-    },
+    request: ({ method, url, data, success }: any) => { assert.equal(method, "PUT"); assert.equal(url, "https://cos.example/photo"); assert.equal(data, "QUJD"); uploaded = true; success({ statusCode: 200, data: "" }); },
     setStorageSync: () => {},
     removeStorageSync: () => {},
     navigateTo: ({ url }: any) => {
@@ -52,7 +44,14 @@ test("capture page compresses, uploads, and submits the selected image", async (
   vm.runInNewContext(
     readFileSync("miniprogram/pages/capture/capture.js", "utf8"),
     {
-      require: () => api,
+      require: (path: string) => {
+        if (path === "../../services/api") return api;
+        if (path === "../../config") return { transport: "https" };
+        if (path === "../../services/cos-upload") return {
+          uploadToCos: (credential: any, filePath: string) => new Promise((resolve, reject) => wx.getFileSystemManager().readFile({ filePath, success: ({ data }: any) => wx.request({ url: credential.uploadUrl, method: credential.method, data, success: (response: any) => response.statusCode === 200 ? resolve({ objectKey: credential.objectKey }) : reject(new Error("upload failed")) }), fail: reject })),
+        };
+        throw new Error(`Unexpected require: ${path}`);
+      },
       wx,
       Page: (definition: any) => {
         page = definition;

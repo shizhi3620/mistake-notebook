@@ -18,19 +18,16 @@ import {
   InMemoryIdempotencyStore,
   type IdempotencyStore,
 } from "./idempotency-store.ts";
-import { assertCloudBaseFileOwnership } from "../adapters/cloudbase-storage.ts";
 import { InMemoryRecognitionTaskStore, type RecognitionTask, type RecognitionTaskStore } from "../adapters/recognition-task-store.ts";
 
 export type LearningLoopServerDependencies = {
   learningLoop: LearningLoop;
   healthCheck?: () => Promise<void>;
   photoStorage?: {
-    verifyUploadedFile(input: {
-      fileId: string;
-      expectedImageKey: string;
-    }): Promise<{ imageUrl: string }>;
-    getTemporaryUrl(fileId: string): Promise<string>;
-    deleteUploadedFile(fileId: string): Promise<void>;
+    createUploadUrl(input: { objectKey: string; contentType: string }): Promise<{ uploadUrl: string; method: "PUT"; headers: Record<string, string> }>;
+    assertObjectExists(objectKey: string): Promise<void>;
+    getTemporaryUrl(objectKey: string): Promise<string>;
+    deleteUploadedFile(objectKey: string): Promise<void>;
   };
   log?: (event: HttpRequestLogEvent) => void;
   weChatIdentityResolver?: (
@@ -379,29 +376,34 @@ export function createLearningLoopServer(
       const childProfileId = String(body?.childProfileId ?? "");
       if (!(await learningLoop.listChildProfilesAsync(auth)).some((child) => child.id === childProfileId)) throw new Error("Child profile was not found.");
       const credential = await recognitionTaskStore.createHomeworkUploadCredential(auth, childProfileId);
-      return send(response, 200, { uploadToken: credential.uploadToken, imageKey: credential.imageKey, expiresAt: credential.expiresAt });
+      if (!photoStorage) throw new Error("Photo storage is not configured.");
+      const upload = await photoStorage.createUploadUrl({ objectKey: credential.imageKey, contentType: "image/jpeg" });
+      return send(response, 200, { uploadToken: credential.uploadToken, objectKey: credential.imageKey, expiresAt: credential.expiresAt, ...upload });
     }
     if (method === "POST" && route === "/recognition-tasks") {
       const childProfileId = String(body?.childProfileId ?? "");
       if (!(await learningLoop.listChildProfilesAsync(auth)).some((child) => child.id === childProfileId)) throw new Error("Child profile was not found.");
       const kind = body?.kind === "homework_page" ? "homework_page" : body?.kind === "single_question" ? "single_question" : null;
       const idempotencyKey = String(request.headers["idempotency-key"] ?? body?.idempotencyKey ?? "");
-      const fileId = String(body?.fileId ?? "");
-      if (!kind || !fileId || !idempotencyKey) throw new Error("Recognition task kind, uploaded file and idempotency key are required.");
+      const objectKey = String(body?.objectKey ?? "");
+      if (!kind || !objectKey || !idempotencyKey) throw new Error("Recognition task kind, uploaded object and idempotency key are required.");
+      if (!photoStorage) throw new Error("Photo storage is not configured.");
       let draftId: string | null = null;
       if (kind === "single_question") {
         draftId = String(body?.draftId ?? "");
         const credential = await learningLoop.getPhotoUploadCredentialAsync(auth, String(body?.uploadToken ?? ""));
         if (credential.draftId !== draftId) throw new Error("Upload credential is not available for this draft.");
-        assertCloudBaseFileOwnership(fileId, credential.imageKey);
-        await learningLoop.completePhotoUploadAsync(auth, credential.uploadToken, fileId);
+        if (objectKey !== credential.imageKey) throw new Error("Uploaded photo is not authorized for this draft.");
+        await photoStorage.assertObjectExists(objectKey);
+        await learningLoop.completePhotoUploadAsync(auth, credential.uploadToken, objectKey);
       } else {
-        const credential = await recognitionTaskStore.consumeHomeworkUploadCredential(auth, String(body?.uploadToken ?? ""), fileId);
+        const credential = await recognitionTaskStore.consumeHomeworkUploadCredential(auth, String(body?.uploadToken ?? ""), objectKey);
         if (credential.childProfileId !== childProfileId) throw new Error("Homework upload credential is not available for this child.");
+        await photoStorage.assertObjectExists(objectKey);
       }
       const entitlements = await learningLoop.getEntitlementsAsync(auth);
       let task = await recognitionTaskStore.create(
-        { parentAccountId: auth, childProfileId, draftId, kind, imageKey: fileId, idempotencyKey, expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 },
+        { parentAccountId: auth, childProfileId, draftId, kind, imageKey: objectKey, idempotencyKey, expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 },
         { startsAt: shanghaiMonthStart(Date.now()), remaining: Math.max(0, entitlements.monthlyPhotoQuota - entitlements.photosUsedThisMonth) },
       );
       try {
@@ -543,84 +545,6 @@ export function createLearningLoopServer(
     }
     const draftPhotoMatch = match(route, "/drafts/:id/photo");
     if (method === "POST" && draftPhotoMatch) {
-      log({
-        event: "photo_recognition_request",
-        requestId: String(response.getHeader("x-request-id") ?? ""),
-        hasUploadToken: Boolean(body?.uploadToken),
-        hasFileId: Boolean(body?.fileId),
-        hasImageDataUrl: typeof body?.imageDataUrl === "string" && body.imageDataUrl.length > 0,
-        imageDataUrlLength: typeof body?.imageDataUrl === "string" ? body.imageDataUrl.length : 0,
-        hasImageUrl: typeof body?.imageUrl === "string" && body.imageUrl.length > 0,
-      });
-      if (body?.fileId && body?.uploadToken) {
-        const credential = await learningLoop.getPhotoUploadCredentialAsync(
-          auth,
-          String(body.uploadToken),
-        );
-        if (credential.draftId !== draftPhotoMatch.id) throw new Error("Upload credential is not available for this draft.");
-        const fileId = String(body.fileId);
-        assertCloudBaseFileOwnership(fileId, credential.imageKey);
-        const suppliedImageDataUrl = String(body.imageDataUrl ?? "");
-        const suppliedImageUrl = String(body.imageUrl ?? "");
-        const imageResolutionStartedAt = Date.now();
-        let uploaded: { imageUrl: string };
-        let imageSource: "data_url" | "client_temp_url" | "server_temp_url";
-        if (suppliedImageDataUrl) {
-          uploaded = { imageUrl: validateRecognitionImageDataUrl(suppliedImageDataUrl) };
-          imageSource = "data_url";
-        } else if (suppliedImageUrl.startsWith("https://")) {
-          uploaded = { imageUrl: suppliedImageUrl };
-          imageSource = "client_temp_url";
-        } else if (photoStorage) {
-          imageSource = "server_temp_url";
-          uploaded = await photoStorage.verifyUploadedFile({
-            fileId,
-            expectedImageKey: credential.imageKey,
-          });
-        } else {
-          throw new Error(
-            "Photo storage URL is not available. Configure client-side CloudBase temporary URL or server storage credentials.",
-          );
-        }
-        log({
-          event: "photo_image_resolved",
-          requestId: String(response.getHeader("x-request-id") ?? ""),
-          source: imageSource,
-          imageUrlLength: uploaded.imageUrl.length,
-          durationMs: Date.now() - imageResolutionStartedAt,
-        });
-        await learningLoop.completePhotoUploadAsync(
-          auth,
-          credential.uploadToken,
-          fileId,
-        );
-        if (!recognitionClient) {
-          throw new Error("题目识别服务未配置。请返回手动录入。");
-        }
-        const recognitionStartedAt = Date.now();
-        log({
-          event: "photo_recognition_started",
-          requestId: String(response.getHeader("x-request-id") ?? ""),
-          imageSource,
-          imageUrlLength: uploaded.imageUrl.length,
-        });
-        const recognition = await recognitionClient({ imageDataUrl: uploaded.imageUrl });
-        log({
-          event: "photo_recognition_succeeded",
-          requestId: String(response.getHeader("x-request-id") ?? ""),
-          confidence: recognition.confidence,
-          durationMs: Date.now() - recognitionStartedAt,
-        });
-        return send(
-          response,
-          200,
-          await learningLoop.recordQuestionRecognitionAsync(
-            auth,
-            draftPhotoMatch.id,
-            recognition,
-          ),
-        );
-      }
       const credential = await learningLoop.requestPhotoUploadAsync(
         auth,
         draftPhotoMatch.id,
@@ -665,15 +589,9 @@ export function createLearningLoopServer(
         auth,
         draftPhotoCredentialMatch.id,
       );
-      return send(
-        response,
-        200,
-        {
-          uploadToken: credential.uploadToken,
-          imageKey: credential.imageKey,
-          expiresAt: credential.expiresAt,
-        },
-      );
+      if (!photoStorage) throw new Error("Photo storage is not configured.");
+      const upload = await photoStorage.createUploadUrl({ objectKey: credential.imageKey, contentType: "image/jpeg" });
+      return send(response, 200, { uploadToken: credential.uploadToken, objectKey: credential.imageKey, expiresAt: credential.expiresAt, ...upload });
     }
     const draftConfirmMatch = match(route, "/drafts/:id/confirm");
     if (method === "POST" && draftConfirmMatch) {
