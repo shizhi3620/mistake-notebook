@@ -97,7 +97,7 @@ const recognitionClient = deepSeekApiKey
       model: process.env.RECOGNITION_MODEL ?? "deepseek-v4-flash-vision-exp",
       // wx.cloud.callContainer has a 15-second client limit. Leave room for
       // Cloud Hosting routing and the response so the client receives a retryable error.
-      timeoutMs: 11_000,
+      timeoutMs: 13_000,
       maxRetries: 0,
       onEvent: logEvent,
     })

@@ -67,7 +67,9 @@ export function createOpenAiCompatibleRecognitionClient(
       );
     }
 
+    const bodyReadStartedAt = Date.now();
     const payload = (await response.json()) as any;
+    options.onEvent?.({ event: "vision_provider_body_read", kind: "single_question", durationMs: Date.now() - bodyReadStartedAt });
     const text = payload?.choices?.[0]?.message?.content;
     options.onEvent?.({ event: "vision_provider_payload", kind: "single_question", ...modelResponseMetadata(payload) });
 
