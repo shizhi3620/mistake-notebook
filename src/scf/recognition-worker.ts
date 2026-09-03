@@ -18,7 +18,12 @@ export async function main(event: { taskId?: string; cleanup?: boolean } | strin
     throw new Error("Worker database, DeepSeek, and CloudBase environment configuration is required.");
   }
   const pool = createMysqlPool(mysql);
-  const storage = createCloudBaseNodeStorageVerifier({ env, region: process.env.CLOUDBASE_REGION ?? "ap-shanghai" });
+  const storage = createCloudBaseNodeStorageVerifier({
+    env,
+    region: process.env.CLOUDBASE_REGION ?? "ap-shanghai",
+    secretId: process.env.CLOUDBASE_SECRET_ID,
+    secretKey: process.env.CLOUDBASE_SECRET_KEY,
+  });
   const taskStore = new MysqlRecognitionTaskStore(pool);
   const retryInvoker = process.env.RECOGNITION_WORKER_FUNCTION_NAME && process.env.SCF_REGION && process.env.TENCENTCLOUD_SECRETID && process.env.TENCENTCLOUD_SECRETKEY
     ? createTencentScfInvoker({ functionName: process.env.RECOGNITION_WORKER_FUNCTION_NAME, region: process.env.SCF_REGION, secretId: process.env.TENCENTCLOUD_SECRETID, secretKey: process.env.TENCENTCLOUD_SECRETKEY })

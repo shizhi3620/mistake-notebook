@@ -44,13 +44,19 @@ export function assertCloudBaseFileOwnership(
 export function createCloudBaseNodeStorageVerifier(options: {
   env: string;
   region?: string;
+  secretId?: string;
+  secretKey?: string;
 }) {
+  const config = {
+    env: options.env,
+    region: options.region,
+    ...(options.secretId && options.secretKey
+      ? { secretId: options.secretId, secretKey: options.secretKey }
+      : {}),
+  };
   return createCloudBaseStorageVerifier({
     getTemporaryUrl: async (fileId) => {
-      const app = cloudbase.init({
-        env: options.env,
-        region: options.region,
-      });
+      const app = cloudbase.init(config);
       const result = await app.getTempFileURL({ fileList: [fileId] });
       const file = result.fileList[0];
       if (!file || file.code !== "SUCCESS") {
@@ -59,7 +65,7 @@ export function createCloudBaseNodeStorageVerifier(options: {
       return file.tempFileURL;
     },
     deleteFile: async (fileId) => {
-      const app = cloudbase.init({ env: options.env, region: options.region });
+      const app = cloudbase.init(config);
       const result = await app.deleteFile({ fileList: [fileId] });
       const file = result.fileList[0];
       if (!file || file.code !== "SUCCESS") throw new Error("Uploaded photo could not be deleted.");
