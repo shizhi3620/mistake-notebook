@@ -6,6 +6,7 @@
     "strict": true,
     "target": "ES2022",
     "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
     "verbatimModuleSyntax": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
