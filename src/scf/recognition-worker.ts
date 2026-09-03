@@ -50,7 +50,14 @@ export const main_handler = main;
 
 function createRecognitionImageApi(baseUrl: string, secret: string) {
   const request = async (path: string) => {
-    const response = await fetch(`${baseUrl}${path}`, { method: "POST", headers: { "x-recognition-worker-secret": secret }, signal: AbortSignal.timeout(15_000) });
+    let response: Response;
+    try {
+      response = await fetch(`${baseUrl}${path}`, { method: "POST", headers: { "x-recognition-worker-secret": secret }, signal: AbortSignal.timeout(15_000) });
+    } catch (error) {
+      const cause = error instanceof Error && "cause" in error ? (error as Error & { cause?: unknown }).cause : undefined;
+      const causeMessage = cause instanceof Error ? cause.message : String(cause ?? "");
+      throw new Error(`Recognition image API network request failed: ${causeMessage.slice(0, 200)}`);
+    }
     if (!response.ok) throw new Error(`Recognition image API failed with status ${response.status}.`);
     return response.json() as Promise<{ imageUrl?: string; deletedCount?: number }>;
   };
