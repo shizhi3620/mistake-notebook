@@ -1,0 +1,44 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?set MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER:?set MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    volumes:
+      - ${MYSQL_DATA_DIR:-/mnt/math-mistake-data/mysql}:/var/lib/mysql
+    expose:
+      - "3306"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build:
+      context: .
+      args:
+        BUILD_VERSION: ${BUILD_VERSION:-mvp-local}
+        BUILD_BRANCH: ${BUILD_BRANCH:-unknown}
+        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
+    env_file: /opt/math-mistake-notebook/.env.mvp
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?set MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER:?set MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
+      MYSQL_SSL: "false"
+      PRODUCTION: "true"
+      PORT: 3000
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
